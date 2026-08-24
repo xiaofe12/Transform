@@ -1,0 +1,157 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>Thanks.Transform</AssemblyName>
+    <RootNamespace>Transform</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Deterministic>true</Deterministic>
+    <DebugType Condition=" '$(Configuration)' == 'Release' ">pdbonly</DebugType>
+    <DebugType Condition=" '$(Configuration)' == 'Debug' ">full</DebugType>
+    <Optimize Condition=" '$(Configuration)' == 'Release' ">true</Optimize>
+    <Optimize Condition=" '$(Configuration)' == 'Debug' ">false</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(PEAKRoot)\BepInEx\core\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(PEAKRoot)\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Photon3Unity3D">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Photon3Unity3D.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="PhotonRealtime">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\PhotonRealtime.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="PhotonUnityNetworking">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\PhotonUnityNetworking.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="netstandard">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\netstandard.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Unity.InputSystem.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.Mathematics">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Unity.Mathematics.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Unity.TextMeshPro.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.ParticleSystemModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.UIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Zorro.Core.Runtime">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Zorro.Core.Runtime.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Plugin\TransformPlugin.cs" />
+    <Compile Include="Core\Localization.cs" />
+    <Compile Include="Core\FormRegistry.cs" />
+    <Compile Include="Core\TransformState.cs" />
+    <Compile Include="Core\RoomPolicy.cs" />
+    <Compile Include="Core\GameInput.cs" />
+    <Compile Include="Core\TransformHud.cs" />
+    <Compile Include="Core\TransformHarmonyPatches.cs" />
+    <Compile Include="Core\PatchUtility.cs" />
+    <Compile Include="Core\FormValidation.cs" />
+    <Compile Include="Core\ModPresence.cs" />
+    <Compile Include="UI\TransformMenu.cs" />
+    <Compile Include="Statue\StatuePlugin.cs" />
+    <Compile Include="Statue\StatueController.cs" />
+    <Compile Include="Statue\StatueHarmonyPatches.cs" />
+    <Compile Include="Zombie\ZombiePlugin.cs" />
+    <Compile Include="Zombie\ZombieController.cs" />
+    <Compile Include="Zombie\ZombieHarmonyPatches.cs" />
+    <Compile Include="Zombie\StatusBarGuard.cs" />
+    <Compile Include="Ghost\GhostPlugin.cs" />
+    <Compile Include="Ghost\GhostController.cs" />
+    <Compile Include="Ghost\GhostHarmonyPatches.cs" />
+    <Compile Include="Tumbleweed\TumbleweedPlugin.cs" />
+    <Compile Include="Tumbleweed\TumbleweedController.cs" />
+    <Compile Include="Tumbleweed\TumbleweedHarmonyPatches.cs" />
+    <Compile Include="Wind\WindPlugin.cs" />
+    <Compile Include="Wind\TornadoController.cs" />
+    <Compile Include="Wind\WindHarmonyPatches.cs" />
+    <Compile Include="Scoutmaster\Plugin.cs" />
+    <Compile Include="Scoutmaster\PlayerScoutmasterController.cs" />
+    <Compile Include="Scoutmaster\ScoutmasterHarmonyPatches.cs" />
+    <Compile Include="Scoutmaster\ControlledScoutmasterVisualSync.cs" />
+    <Compile Include="Critters\CritterPlugin.cs" />
+    <Compile Include="Critters\CritterController.cs" />
+    <Compile Include="Critters\CritterHarmonyPatches.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+
+</Project>
