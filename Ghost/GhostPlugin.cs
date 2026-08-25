@@ -183,7 +183,7 @@ internal static class GhostPlugin
 	{
 		if (GhostController.IsLocalGhostCharacter(character))
 		{
-			Log?.LogWarning("[I'm a Ghost] Already in ghost form.");
+			FormValidation.ReportFailure(Log, "I'm a Ghost", "[I'm a Ghost] Already in ghost form.");
 			return false;
 		}
 		return FormValidation.IsValid(Log, "I'm a Ghost", FormValidation.ValidateTransformable(character));

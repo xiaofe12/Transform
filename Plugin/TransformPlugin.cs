@@ -11,6 +11,7 @@ using ImTornado;
 using ImTumbleweed;
 using ImZombie;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Transform;
 
@@ -30,7 +31,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.github.Thanks.Transform";
     public const string PluginName = "Transform";
-    public const string PluginVersion = "0.9.7";
+    public const string PluginVersion = "0.9.8";
 
     internal static TransformPlugin Instance { get; private set; }
     internal static ManualLogSource Log { get; private set; }
@@ -97,8 +98,23 @@ public sealed class TransformPlugin : BaseUnityPlugin
 
         Core.TransformMenu.Initialize(Logger, MenuScale);
 
-        Logger.LogInfo("[Transform] Unified mod loaded: normal zombie, player zombie, mushroom-man zombie, scoutmaster, ghost, tumbleweed, tornado, statue, frog, beetle, scorpion, coconut, bomb and cactus forms.");
+        // 场景卸载时清空本地形态状态，防止重进大厅后短按 F 误触上次变身。
+        SceneManager.sceneUnloaded += OnSceneUnloaded;
+
+        Logger.LogInfo("[Transform] Unified mod loaded: normal zombie, player zombie, mushroom-man zombie, scoutmaster, ghost, tumbleweed, tornado, statue, frog, beetle, scorpion, coconut and bomb forms.");
         Logger.LogInfo("[Transform] Hold " + MenuKey.Value + " for ~1s to open/close the menu; tap it to transform/restore.");
+    }
+
+    /// <summary>场景卸载时清除本地形态状态：上次形态 + 菜单选中/双击状态 + 关闭菜单。</summary>
+    private static void OnSceneUnloaded(Scene scene)
+    {
+        if (Instance == null)
+        {
+            return;
+        }
+        Instance._lastFormId = null;
+        Core.TransformMenu.ClearSelection();
+        Core.TransformMenu.SetOpen(false);
     }
 
     private void Update()
@@ -151,9 +167,11 @@ public sealed class TransformPlugin : BaseUnityPlugin
                 && Time.unscaledTime - _menuKeyHoldStart >= DefaultMenuHoldSeconds)
             {
                 _menuKeyHoldFired = true;
-                // Don't open on top of the game's own blocking UI (pause menu, backpack wheel).
-                bool gameBlocking = GUIManager.instance != null && GUIManager.instance.windowBlockingInput;
-                if (gameBlocking && !Core.TransformMenu.IsOpen) return;
+                // 主菜单（无本地角色）禁止打开面板；面板已开时仍可关闭。
+                if (!Core.TransformMenu.IsOpen && Character.localCharacter == null)
+                {
+                    return;
+                }
                 Core.TransformMenu.SetOpen(!Core.TransformMenu.IsOpen);
             }
 
@@ -279,7 +297,11 @@ public sealed class TransformPlugin : BaseUnityPlugin
             }
 
             bool entered = false;
-            try { entered = target.Enter(); }
+            try
+            {
+                Core.CarryGuard.DropBeforeTransform(Character.localCharacter, Log);
+                entered = target.Enter();
+            }
             catch (Exception ex) { Log.LogError("[Transform] Failed to enter " + target.Name + ":\n" + ex); }
 
             if (entered)
@@ -351,6 +373,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
 
     private void OnDestroy()
     {
+        SceneManager.sceneUnloaded -= OnSceneUnloaded;
         Core.TransformMenu.SetOpen(false);
 
         Statue.StatuePlugin.Shutdown();

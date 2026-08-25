@@ -24,12 +24,6 @@ internal static class ZombiePlugin
     public const string Name = "I'm a Zombie";
     public const string Version = "1.0.2";
 
-    /// <summary>Custom Photon event code for hiding/showing the original player body on remote clients.</summary>
-    /// <remarks>
-    /// Photon's RaiseEvent rejects any code >= 200 ("must be less than 200 (0..199)"), so the old
-    /// value 215 was silently dropped — the log shows "RaiseEvent(215) failed". PEAK registers its
-    /// own packages on codes 1, 2 and 4, so we use a high unused value in the valid user range.
-    /// </remarks>
     private const byte BodyVisibilityEventCode = 199;
     // Distinctive tag so we only handle OUR events on code 199. PEAK (and other
     // mods) also raise events on 199; without this tag we'd mis-cast their payload
@@ -337,7 +331,7 @@ internal static class ZombiePlugin
         // other. The unified orchestrator exits the active form first, but keep this as a guard.
         if (ZombieController.IsOtherTransformModActive())
         {
-            Log?.LogWarning("[I'm a Zombie] Another transform form is active — exit it first.");
+            FormValidation.ReportFailure(Log, "I'm a Zombie", "[I'm a Zombie] Another transform form is active — exit it first.");
             return false;
         }
         return FormValidation.IsValid(Log, "I'm a Zombie", FormValidation.ValidateTransformable(character, checkSpecialForm: false));

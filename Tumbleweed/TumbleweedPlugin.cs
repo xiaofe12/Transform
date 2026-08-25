@@ -242,7 +242,7 @@ internal static class TumbleweedPlugin
 	{
 		if (TumbleweedController.IsLocalWeedCharacter(character))
 		{
-			Log?.LogWarning("[I'm a Tumbleweed] Already in tumbleweed form.");
+			FormValidation.ReportFailure(Log, "I'm a Tumbleweed", "[I'm a Tumbleweed] Already in tumbleweed form.");
 			return false;
 		}
 		return FormValidation.IsValid(Log, "I'm a Tumbleweed", FormValidation.ValidateTransformable(character));

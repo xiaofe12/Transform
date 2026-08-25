@@ -5,25 +5,6 @@ using BepInEx.Logging;
 using UnityEngine;
 
 namespace Transform.Core;
-
-/// <summary>
-/// The in-game transformation menu (IMGUI — no game-prefab dependency, survives game updates).
-///
-/// 视觉方案：深色现代主题（贴合登山游戏氛围）。所有背景均为运行时程序化生成的圆角贴图
-/// （MakeRoundTexture，带 1px 描边与抗锯齿），不依赖任何游戏资源；色彩语义统一——
-/// 绿 = 可用/激活，琥珀 = 房间限制/强调，红 = 禁用，蓝 = 就绪。
-///
-/// 文本渲染：
-///  1. 只用游戏自带字体：中文 = NotoSansSC（游戏简体菜单字体，中英文均可显示）、
-///     英文 = NotInter（游戏主 UI 字体）；未命中时按优先级回退到其他游戏字体，
-///     全部未加载时临时用 IMGUI 默认字体并在下次打开菜单时重试；
-///  2. 所有自建 GUIStyle 均带 margin（默认 0 会让页签/按钮互相紧贴）；
-///  3. 按钮垂直 padding 压到 4px 并配合足够 Height，内容区 ≥ 字号×1.5。
-///
-/// While open, the menu flips the game's OWN input gates via Harmony postfixes on
-/// GUIManager.windowBlockingInput / windowShowingCursor getters (see TransformHarmonyPatches).
-/// This class only owns the MenuOpen flag.
-/// </summary>
 internal static class TransformMenu
 {
     private static ManualLogSource _log;
@@ -137,6 +118,8 @@ internal static class TransformMenu
     private static GUIStyle _settingsDescStyle;
     private static GUIStyle _settingsSectionHeaderStyle;
     private static GUIStyle _settingsValueLabelStyle;
+    /// <summary>每帧 CalcSize/CalcHeight 的共享 GUIContent（使用前必须赋 text），避免 OnGUI 每帧分配。</summary>
+    private static readonly GUIContent _scratchContent = new GUIContent();
     private static GUIStyle _settingsInputStyle;
     private static GUIStyle _hintStyle;
     private static GUIStyle _policyNoticeStyle;
@@ -160,6 +143,14 @@ internal static class TransformMenu
         var forms = FormRegistry.Forms;
         if (_selectedFormIndex < 0 || _selectedFormIndex >= forms.Count) return null;
         return forms[_selectedFormIndex];
+    }
+
+    /// <summary>清除形态页选中与双击状态（场景卸载/回主菜单时调用），防止重进大厅后按 F 误触变身。</summary>
+    internal static void ClearSelection()
+    {
+        _selectedFormIndex = -1;
+        _lastClickFormIndex = -1;
+        _lastClickTime = 0f;
     }
 
     internal static void Initialize(ManualLogSource log, ConfigEntry<float> scaleEntry = null)
@@ -298,13 +289,16 @@ internal static class TransformMenu
         // 标题（左）：英文 "Transform Panel" 比中文宽，不能用固定 110px。
         string titleText = Localization.Tr("变身面板", "Transform Panel");
         float tabY = (TitleBarHeight - 30f) * 0.5f;
-        float titleW = Mathf.Clamp(_titleStyle.CalcSize(new GUIContent(titleText)).x + 16f, 118f, Mathf.Max(118f, w * 0.28f));
+        _scratchContent.text = titleText;
+        float titleW = Mathf.Clamp(_titleStyle.CalcSize(_scratchContent).x + 16f, 118f, Mathf.Max(118f, w * 0.28f));
         Rect titleRect = new Rect(14f, (TitleBarHeight - 30f) * 0.5f, titleW, 30f);
         ShadowedLabel(titleRect, titleText, _titleStyle);
 
         // 页签：形态 / 参数调整（与标题平齐，紧贴在标题右侧）
-        float formsW = Mathf.Max(70f, _tabIdleStyle.CalcSize(new GUIContent(Localization.Tr("形态", "Forms"))).x + 30f);
-        float settingsW = Mathf.Max(86f, _tabIdleStyle.CalcSize(new GUIContent(Localization.Tr("参数调整", "Settings"))).x + 30f);
+        _scratchContent.text = Localization.Tr("形态", "Forms");
+        float formsW = Mathf.Max(70f, _tabIdleStyle.CalcSize(_scratchContent).x + 30f);
+        _scratchContent.text = Localization.Tr("参数调整", "Settings");
+        float settingsW = Mathf.Max(86f, _tabIdleStyle.CalcSize(_scratchContent).x + 30f);
         float formsX = titleRect.xMax + 14f;
         float settingsX = formsX + formsW + 8f;
         Rect formsTabRect = new Rect(formsX, tabY, formsW, 30f);
@@ -609,7 +603,8 @@ internal static class TransformMenu
         float descW = contentW;
         float descY = card.y + 43f;
         float descMaxH = Mathf.Max(34f, card.yMax - descY - 8f);
-        float descH = Mathf.Clamp(_cardDescStyle.CalcHeight(new GUIContent(desc), descW), 34f, descMaxH);
+        _scratchContent.text = desc;
+        float descH = Mathf.Clamp(_cardDescStyle.CalcHeight(_scratchContent, descW), 34f, descMaxH);
         Rect descRect = new Rect(left, descY, descW, descH);
         ShadowedLabel(descRect, desc, _cardDescStyle);
 
@@ -740,7 +735,8 @@ internal static class TransformMenu
 
         GUILayout.Space(28f);
         string resetText = Localization.Tr("恢复该形态默认参数", "Reset this form to defaults");
-        float resetW = Mathf.Clamp(_btnStyle.CalcSize(new GUIContent(resetText)).x + 44f, 220f, 360f);
+        _scratchContent.text = resetText;
+        float resetW = Mathf.Clamp(_btnStyle.CalcSize(_scratchContent).x + 44f, 220f, 360f);
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
         if (GUILayout.Button(resetText, _btnStyle, GUILayout.Height(36f), GUILayout.Width(resetW)))
@@ -1211,8 +1207,7 @@ internal static class TransformMenu
         return id == FormId.Frog
                || id == FormId.Scorpion
                || id == FormId.Coconut
-               || id == FormId.Bomb
-               || id == FormId.Cactus;
+               || id == FormId.Bomb;
     }
 
     private static string PickupWarningText(bool compact)

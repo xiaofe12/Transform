@@ -798,8 +798,11 @@ public sealed class ZombieController : MonoBehaviour
                     {
                         Rigidbody rig = part?.Rig;
                         if (rig == null) continue;
-                        rig.linearVelocity = Vector3.zero;
-                        rig.angularVelocity = Vector3.zero;
+                        if (!rig.isKinematic)
+                        {
+                            rig.linearVelocity = Vector3.zero;
+                            rig.angularVelocity = Vector3.zero;
+                        }
                         rig.detectCollisions = false;
                         rig.useGravity = false;
                         rig.isKinematic = true;
@@ -1300,8 +1303,11 @@ public sealed class ZombieController : MonoBehaviour
                 _frozenKinematic.Add(rig.isKinematic);
                 _frozenDetectCollisions.Add(rig.detectCollisions);
                 _frozenUseGravity.Add(rig.useGravity);
-                rig.linearVelocity = Vector3.zero;
-                rig.angularVelocity = Vector3.zero;
+                if (!rig.isKinematic)
+                {
+                    rig.linearVelocity = Vector3.zero;
+                    rig.angularVelocity = Vector3.zero;
+                }
                 rig.detectCollisions = false;
                 rig.useGravity = false;
                 rig.isKinematic = true;
@@ -1333,8 +1339,11 @@ public sealed class ZombieController : MonoBehaviour
                 rig.isKinematic = i < _frozenKinematic.Count && _frozenKinematic[i];
                 rig.detectCollisions = i < _frozenDetectCollisions.Count && _frozenDetectCollisions[i];
                 rig.useGravity = i < _frozenUseGravity.Count && _frozenUseGravity[i];
-                rig.linearVelocity = Vector3.zero;
-                rig.angularVelocity = Vector3.zero;
+                if (!rig.isKinematic)
+                {
+                    rig.linearVelocity = Vector3.zero;
+                    rig.angularVelocity = Vector3.zero;
+                }
             }
             _frozenBodyparts.Clear();
             _frozenKinematic.Clear();

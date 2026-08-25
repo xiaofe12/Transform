@@ -20,35 +20,6 @@ internal enum CritterKind
 	Cactus
 }
 
-/// <summary>
-/// Runtime controller added to the local player's Character while they are a critter
-/// (frog / beetle / scorpion MobItem items, plus the coconut Item, spawned over Photon so every
-/// client, including unmodded ones, sees the living critter).
-///
-/// The critter's vanilla movement AI is suppressed on modded clients by Harmony prefixes on
-/// Mob.Update and FrogTongue.CheckAllCharacters (gated on the registry below); the owner then
-/// drives the Mob's own Rigidbody with WASD forces — the proven physics-form recipe
-/// shared with the tumbleweed and statue forms. FrogTongue.FixedUpdate/LateUpdate keep
-/// running everywhere so the tongue pull force and tongue visual replicate through the
-/// vanilla RPCs to every client (including unmodded ones). Item interactions are blocked
-/// (Item.blockInteraction) so nobody can pick up the transformed player.
-///
-/// The player's ragdoll is switched to kinematic no-clip (ghost/tumbleweed recipe) and
-/// the character root follows the critter every frame; the network broadcast of the
-/// player's position is redirected 30m straight down (see CritterHarmonyPatches) so
-/// remote clients never see a body inside the critter — the "buried body" approach that
-/// proved most stable across the five source mods.
-///
-/// Controls (aligned with the other physics forms):
-///  - WASD: move (camera-relative);
-///  - Shift: sprint (drains the shared stamina bar, zombie recipe);
-///  - Space: hop — the FROG leaps toward the control direction using direct launch
-///    speeds (MaxSpeed = distance, JumpSpeed = height);
-///  - RMB: attack. Frog shoots its tongue at the crosshair target via the vanilla
-///    RPC-synced FrogTongue.Attack; beetle charges and bonks (RPCA_Fall + physics
-///    impulse, vanilla bonkForce/bonkForceUp values); scorpion stings (RPCA_Fall +
-///    the vanilla poison affliction); coconut charges and slams toward the aim point.
-/// </summary>
 [DefaultExecutionOrder(600)]
 public sealed class CritterController : MonoBehaviour
 {
@@ -78,9 +49,7 @@ public sealed class CritterController : MonoBehaviour
 	private const float CoconutMaxSlamSpeed = 28f;
 	private const float CoconutSlamRange = 45f;
 	private const float CoconutSlamUpBias = 0.16f;
-	private const float CactusLaunchRange = 32f;
-	private const float CactusLaunchSpeed = 24f;
-	private const float CactusLaunchUpBias = 0.08f;
+	private const float FrogPullStopDistance = 2.6f;
 	private const float BreakRestoreItemRestoreDelaySeconds = 1f;
 	private const float ControlledLinearDamping = 0.05f;
 	private const float ControlledAngularDamping = 8f;
@@ -184,6 +153,7 @@ public sealed class CritterController : MonoBehaviour
 	private bool _loggedControlledPhysics;
 	private Vector3 _controlledFlatVelocity;
 	private Renderer[] _localRenderers;
+	private readonly Dictionary<Renderer, bool> _localRendererStates = new Dictionary<Renderer, bool>();
 	private readonly List<KeyValuePair<Rigidbody, RigidbodyInterpolation>> _savedInterpolations =
 		new List<KeyValuePair<Rigidbody, RigidbodyInterpolation>>();
 
@@ -498,6 +468,10 @@ public sealed class CritterController : MonoBehaviour
 			// light immediately. Keep the vanilla fuse/explosion path, but make RMB the only igniter.
 			_dynamite.lightFuseRadius = 0f;
 		}
+		if (kind == CritterKind.Frog)
+		{
+			ConfigureControlledFrogTongue();
+		}
 
 		// Register BEFORE disabling the brain so the Harmony patches (also on remote modded
 		// clients once they see the object — see the PhotonView instantiation callback below)
@@ -530,6 +504,17 @@ public sealed class CritterController : MonoBehaviour
 		}
 
 		return spawned;
+	}
+
+	private void ConfigureControlledFrogTongue()
+	{
+		if (_frog == null) return;
+		_frog.extraDragLetGo = 0f;
+		_frog.launchForce = 0f;
+		_frog.liftForce = 0f;
+		_frog.liftDragForce = 0f;
+		_frog.extraDragOther = 0f;
+		_frog.stopPullFriendDistance = Mathf.Max(_frog.stopPullFriendDistance, FrogPullStopDistance);
 	}
 
 	private static string[] GetPrefabNameCandidates(CritterKind kind)
@@ -1040,6 +1025,10 @@ public sealed class CritterController : MonoBehaviour
 		bool isCoconut = _kind == CritterKind.Coconut;
 		bool isBomb = _kind == CritterKind.Bomb;
 		bool isCactus = _kind == CritterKind.Cactus;
+		if (isCactus && _critterRigidbody.isKinematic)
+		{
+			return;
+		}
 
 		if (isFrog)
 		{
@@ -1275,7 +1264,8 @@ public sealed class CritterController : MonoBehaviour
 				Type type = behaviour.GetType();
 				if (!HasSetKinematicRpcByComponentType.TryGetValue(type, out bool hasMethod))
 				{
-					hasMethod = AccessTools.Method(type, methodName) != null;
+					hasMethod = type.GetMethod(methodName,
+						BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null;
 					HasSetKinematicRpcByComponentType[type] = hasMethod;
 				}
 				if (hasMethod) return true;
@@ -1406,35 +1396,10 @@ public sealed class CritterController : MonoBehaviour
 		}
 	}
 
-	/// <summary>Cactus: launch at the crosshair target. The vanilla CactusBall collision code
-	/// handles sticking to the remote player's local body when it arrives.</summary>
+	/// <summary>Cactus is disabled and not exposed in the form menu.</summary>
 	private bool TryCactusLaunch()
 	{
-		if (_kind != CritterKind.Cactus || _critterRigidbody == null || _critterRoot == null) return false;
-		try
-		{
-			Character target = FindCrosshairTarget(CactusLaunchRange, 4f);
-			Vector3 aimPoint = target != null ? target.Center : FindCrosshairPoint(CactusLaunchRange);
-			Vector3 origin = _critterRigidbody.position;
-			Vector3 direction = aimPoint - origin;
-			if (direction.sqrMagnitude < 0.25f) direction = GetFlatLookDirection();
-			direction = direction.normalized + Vector3.up * CactusLaunchUpBias;
-			if (_item != null)
-			{
-				ItemLastThrownCharacterField?.SetValue(_item, _character);
-				ItemLastThrownTimeField?.SetValue(_item, Time.time);
-			}
-			_critterRigidbody.linearVelocity = direction.normalized * CactusLaunchSpeed;
-			_critterRigidbody.angularVelocity += Vector3.Cross(Vector3.up, direction).normalized * 18f;
-			ForceCritterPhysicsSync(10);
-			LogInfo("Cactus launched" + (target != null ? " at " + target.characterName : " at crosshair") + ".");
-			return true;
-		}
-		catch (Exception ex)
-		{
-			LogError("TryCactusLaunch", ex);
-			return false;
-		}
+		return false;
 	}
 
 	private Vector3 GetCrosshairLaunchDirection(float range)
@@ -2251,8 +2216,12 @@ public sealed class CritterController : MonoBehaviour
 				if (!IsFiniteVector(oldPartPosition)) oldPartPosition = oldCenter;
 				part.Rig.position = position + rotationDelta * (oldPartPosition - oldCenter);
 				part.Rig.rotation = rotationDelta * part.Rig.rotation;
-				part.Rig.linearVelocity = Vector3.zero;
-				part.Rig.angularVelocity = Vector3.zero;
+				// 定位时刚体可能仍为 kinematic，清零只在非 kinematic 时执行（避免 Unity 警告）。
+				if (!part.Rig.isKinematic)
+				{
+					part.Rig.linearVelocity = Vector3.zero;
+					part.Rig.angularVelocity = Vector3.zero;
+				}
 			}
 			else if (part.transform != null)
 			{
@@ -2346,10 +2315,13 @@ public sealed class CritterController : MonoBehaviour
 		if (_character == null) return;
 		try
 		{
+			_localRendererStates.Clear();
 			_localRenderers = ((Component)_character).GetComponentsInChildren<Renderer>(true);
 			foreach (Renderer renderer in _localRenderers)
 			{
-				if (renderer != null) renderer.enabled = false;
+				if (renderer == null) continue;
+				_localRendererStates[renderer] = renderer.enabled;
+				renderer.enabled = false;
 			}
 		}
 		catch (Exception ex)
@@ -2382,8 +2354,18 @@ public sealed class CritterController : MonoBehaviour
 			Renderer[] renderers = ((Component)_character).GetComponentsInChildren<Renderer>(true);
 			foreach (Renderer renderer in renderers)
 			{
-				if (renderer != null) renderer.enabled = true;
+				if (renderer == null) continue;
+				if (_localRendererStates.TryGetValue(renderer, out bool wasEnabled))
+				{
+					renderer.enabled = wasEnabled;
+				}
+				else if (!renderer.enabled)
+				{
+					renderer.enabled = true;
+				}
 			}
+			_localRendererStates.Clear();
+			_localRenderers = null;
 		}
 		catch (Exception ex)
 		{

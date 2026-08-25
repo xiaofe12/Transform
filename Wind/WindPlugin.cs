@@ -167,7 +167,7 @@ internal static class WindPlugin
 	{
 		if (TornadoController.IsLocalTornadoCharacter(character))
 		{
-			Log?.LogWarning("[I'm a Tornado] Already in tornado form.");
+			FormValidation.ReportFailure(Log, "I'm a Tornado", "[I'm a Tornado] Already in tornado form.");
 			return false;
 		}
 		return FormValidation.IsValid(Log, "I'm a Tornado", FormValidation.ValidateTransformable(character));

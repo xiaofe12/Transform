@@ -13,10 +13,14 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 	private static readonly MethodInfo ScoutmasterResetInputMethod = typeof(Scoutmaster).GetMethod("ResetInput", InstanceFlags);
 	private static readonly MethodInfo ScoutmasterDoVisualsMethod = typeof(Scoutmaster).GetMethod("DoVisuals", InstanceFlags);
 	private static readonly MethodInfo GrabbingThrowMethod = typeof(CharacterGrabbing).GetMethod("Throw", InstanceFlags);
+	private static readonly FieldInfo ScoutmasterCharacterField = typeof(Scoutmaster).GetField("character", InstanceFlags);
 	private static readonly FieldInfo ScoutmasterCurrentTargetField = typeof(Scoutmaster).GetField("_currentTarget", InstanceFlags);
 	private static readonly FieldInfo ScoutmasterChillForSecondsField = typeof(Scoutmaster).GetField("chillForSeconds", InstanceFlags);
 	private static readonly FieldInfo CharacterDataGrabbedPlayerField = typeof(CharacterData).GetField("grabbedPlayer", InstanceFlags);
 	private static readonly FieldInfo BodypartCharacterField = typeof(Bodypart).GetField("character", InstanceFlags);
+	private static readonly FieldInfo BodypartTargetRotationField = typeof(Bodypart).GetField("targetRotation", InstanceFlags);
+	private static readonly FieldInfo BodypartLastTargetRotationField = typeof(Bodypart).GetField("lastTargetRotation", InstanceFlags);
+	private static readonly FieldInfo BodypartPrevRotField = typeof(Bodypart).GetField("prevRot", InstanceFlags);
 	private static readonly BodypartType[] GroundedFootParts =
 	{
 		BodypartType.Foot_L,
@@ -30,6 +34,10 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 	private const float GrabProbeRetrySeconds = 0.08f;
 	private const float GrabProbeSuccessCooldownSeconds = 0.2f;
 	private const float OriginalScoutmasterClimbInput = 1f;
+	// ---- 每帧性能优化：RaycastNonAlloc 复用静态 buffer（零 GC 分配）；ResetInput 委托化 ----
+	private static readonly RaycastHit[] GroundProbeHitsBuffer = new RaycastHit[64];
+	private static readonly RaycastHit[] ClimbProbeHitsBuffer = new RaycastHit[64];
+	private static Action<Scoutmaster> _scoutmasterResetInputAction;
 	private const float MovementInputDeadzone = 0.01f;
 	private const float GroundedFootGroundClearance = 0.03f;
 	private const float GroundProbeUp = 2.5f;
@@ -63,10 +71,14 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 		Plugin.CheckReflectionMember(missing, ScoutmasterResetInputMethod, "Scoutmaster.ResetInput");
 		Plugin.CheckReflectionMember(missing, ScoutmasterDoVisualsMethod, "Scoutmaster.DoVisuals");
 		Plugin.CheckReflectionMember(missing, GrabbingThrowMethod, "CharacterGrabbing.Throw");
+		Plugin.CheckReflectionMember(missing, ScoutmasterCharacterField, "Scoutmaster.character");
 		Plugin.CheckReflectionMember(missing, ScoutmasterCurrentTargetField, "Scoutmaster._currentTarget");
 		Plugin.CheckReflectionMember(missing, ScoutmasterChillForSecondsField, "Scoutmaster.chillForSeconds");
 		Plugin.CheckReflectionMember(missing, CharacterDataGrabbedPlayerField, "CharacterData.grabbedPlayer");
 		Plugin.CheckReflectionMember(missing, BodypartCharacterField, "Bodypart.character");
+		Plugin.CheckReflectionMember(missing, BodypartTargetRotationField, "Bodypart.targetRotation");
+		Plugin.CheckReflectionMember(missing, BodypartLastTargetRotationField, "Bodypart.lastTargetRotation");
+		Plugin.CheckReflectionMember(missing, BodypartPrevRotField, "Bodypart.prevRot");
 	}
 
 	public static bool IsControlled(Scoutmaster scoutmaster)
@@ -114,11 +126,12 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 					continue;
 				}
 
-				rig.linearVelocity = Vector3.zero;
-				rig.angularVelocity = Vector3.zero;
+				// 先解除 kinematic 再清速度，避免对 kinematic 刚体设速度产生 Unity 警告。
 				rig.detectCollisions = true;
 				rig.useGravity = true;
 				rig.isKinematic = false;
+				rig.linearVelocity = Vector3.zero;
+				rig.angularVelocity = Vector3.zero;
 				rig.WakeUp();
 			}
 		}
@@ -372,6 +385,27 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 		if (headTransform != null)
 		{
 			headTransform.rotation = rotation;
+			// 同步动画旋转字段，防止 Animator 与物理 rotation 互相覆盖导致抽搐。
+			SyncHeadAnimationRotation(headPart);
+		}
+	}
+
+	private static void SyncHeadAnimationRotation(Bodypart head)
+	{
+		if (head == null)
+		{
+			return;
+		}
+
+		try
+		{
+			Quaternion localRotation = head.transform.localRotation;
+			BodypartTargetRotationField?.SetValue(head, localRotation);
+			BodypartLastTargetRotationField?.SetValue(head, localRotation);
+			BodypartPrevRotField?.SetValue(head, head.transform.rotation);
+		}
+		catch
+		{
 		}
 	}
 
@@ -381,20 +415,30 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 		{
 			forward = Vector3.forward;
 		}
+		forward.Normalize();
+
 		if (!IsFiniteVector(up) || up.sqrMagnitude < 0.0001f)
 		{
 			up = Vector3.up;
 		}
-		forward.Normalize();
 		up.Normalize();
-		if (Mathf.Abs(Vector3.Dot(forward, up)) > 0.98f)
+
+		// forward/up 近平行时用叉积重建 up，避免万向节锁导致的朝向抖动。
+		if (Mathf.Abs(Vector3.Dot(forward, up)) > 0.96f)
 		{
-			up = Vector3.up;
-			if (Mathf.Abs(Vector3.Dot(forward, up)) > 0.98f)
+			Vector3 right = Vector3.Cross(Vector3.up, forward);
+			if (!IsFiniteVector(right) || right.sqrMagnitude < 0.0001f)
 			{
-				up = Vector3.right;
+				right = Vector3.Cross(Vector3.right, forward);
 			}
+			if (!IsFiniteVector(right) || right.sqrMagnitude < 0.0001f)
+			{
+				right = Vector3.right;
+			}
+			right.Normalize();
+			up = Vector3.Cross(forward, right).normalized;
 		}
+
 		return Quaternion.LookRotation(forward, up);
 	}
 
@@ -460,9 +504,21 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 			return;
 		}
 
+		// ResetInput() 读取组件私有 character 字段，该字段在 Scoutmaster.Start() 后才赋值——
+		// 首帧（执行序 -100 早于 Start）前静默跳过，玩家输入本就直接采样。
+		if (ScoutmasterCharacterField != null && ScoutmasterCharacterField.GetValue(_scoutmaster) == null)
+		{
+			return;
+		}
+
 		try
 		{
-			ScoutmasterResetInputMethod.Invoke(_scoutmaster, null);
+			// 委托化：避免每帧反射 Invoke。
+			if (_scoutmasterResetInputAction == null)
+			{
+				_scoutmasterResetInputAction = (Action<Scoutmaster>)Delegate.CreateDelegate(typeof(Action<Scoutmaster>), ScoutmasterResetInputMethod);
+			}
+			_scoutmasterResetInputAction(_scoutmaster);
 		}
 		catch (TargetInvocationException ex)
 		{
@@ -789,24 +845,25 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 	private bool TryFindLocalClimbHit(Vector3 origin, Vector3 forward, float distance, out RaycastHit climbHit)
 	{
 		climbHit = default;
-		RaycastHit[] hits;
+		int hitCount;
 		try
 		{
-			hits = Physics.RaycastAll(origin, forward, Mathf.Max(distance, 0.25f), ~0, QueryTriggerInteraction.Ignore);
+			// RaycastNonAlloc 复用静态 buffer（零分配）；命中按 distance 升序，首个过滤命中即最近。
+			hitCount = Physics.RaycastNonAlloc(origin, forward, ClimbProbeHitsBuffer, Mathf.Max(distance, 0.25f), ~0, QueryTriggerInteraction.Ignore);
 		}
 		catch
 		{
 			return false;
 		}
 
-		if (hits == null || hits.Length == 0)
+		if (hitCount <= 0)
 		{
 			return false;
 		}
 
-		Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
-		foreach (RaycastHit hit in hits)
+		for (int i = 0; i < hitCount; i++)
 		{
+			RaycastHit hit = ClimbProbeHitsBuffer[i];
 			if (hit.collider == null || hit.collider.isTrigger)
 			{
 				continue;
@@ -1025,24 +1082,25 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 			return false;
 		}
 
-		RaycastHit[] hits;
+		int hitCount;
 		try
 		{
-			hits = Physics.RaycastAll(origin + Vector3.up * GroundProbeUp, Vector3.down, GroundProbeDistance, ~0, QueryTriggerInteraction.Ignore);
+			// RaycastNonAlloc 复用静态 buffer（零分配），命中按 distance 升序，首个过滤命中即最近。
+			hitCount = Physics.RaycastNonAlloc(origin + Vector3.up * GroundProbeUp, Vector3.down, GroundProbeHitsBuffer, GroundProbeDistance, ~0, QueryTriggerInteraction.Ignore);
 		}
 		catch
 		{
 			return false;
 		}
 
-		if (hits == null || hits.Length == 0)
+		if (hitCount <= 0)
 		{
 			return false;
 		}
 
-		Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
-		foreach (RaycastHit hit in hits)
+		for (int i = 0; i < hitCount; i++)
 		{
+			RaycastHit hit = GroundProbeHitsBuffer[i];
 			if (hit.collider == null || hit.collider.isTrigger)
 			{
 				continue;

@@ -9,30 +9,6 @@ using UnityObject = UnityEngine.Object;
 
 namespace ImTumbleweed;
 
-/// <summary>
-/// Runtime controller added to the local player's Character while they are a tumbleweed.
-///
-/// The weed is the game's own "tumbleweed" prefab (the rolling hazard spawned by the
-/// TumbleWeedSpawner objects on the mountain maps). We spawn it over Photon - exactly like
-/// the game's NetworkedObjectSpawner does - so every client (including unmodded ones) sees
-/// it, and the prefab's own PhotonRigidbodyView replicates its physics to everyone. The
-/// vanilla TumbleWeed AI (chasing the nearest player) is suppressed with a Harmony prefix
-/// on modded clients, while its OnCollisionEnter knockdown/thorn logic is kept: rolling
-/// into other players knocks them down, just like the real hazard.
-///
-/// The player's ragdoll is switched to kinematic no-clip (same as the I'm a Ghost mod) and
-/// the character root follows the weed's physics position every frame; the local player
-/// model is HIDDEN while transformed (matching remote clients, which receive a buried
-/// coordinate and never see the rider on the ball) so the user just sees the tumbleweed
-/// rolling. The network broadcast of the
-/// rider's position is redirected to a buried spot (30m straight down, x/z preserved) so
-/// unmodded clients never receive a coordinate inside the live weed ball - which their
-/// physics would otherwise push back out. Modded clients instead pin the rider to the weed
-/// centre locally (its collisions with the weed are ignored, so it is never pushed out).
-///
-/// Controls: WASD applies a rolling force (camera-relative), Shift multiplies it, Space
-/// hops when the weed is grounded, and RMB gives a forward burst.
-/// </summary>
 [DefaultExecutionOrder(600)]
 public sealed class TumbleweedController : MonoBehaviour
 {
@@ -257,7 +233,7 @@ public sealed class TumbleweedController : MonoBehaviour
 		// The local player model is hidden while transformed so the local view matches
 		// remote clients (which receive a buried coordinate and never see the rider on the
 		// ball): the camera follows the weed and the user just sees the tumbleweed rolling.
-		// ForceShowLocalRenderers() restores everything on exit.
+		// ForceShowLocalRenderers() restores the player renderers to their original states.
 		HideLocalRenderers();
 		HideHud();
 		LogInfo("Entered tumbleweed form.");
@@ -722,8 +698,12 @@ public sealed class TumbleweedController : MonoBehaviour
 			if (part.Rig != null)
 			{
 				part.Rig.position += delta;
-				part.Rig.linearVelocity = Vector3.zero;
-				part.Rig.angularVelocity = Vector3.zero;
+				// 定位前刚体仍可能 kinematic，清零只在非 kinematic 时执行（避免 Unity 警告）。
+				if (!part.Rig.isKinematic)
+				{
+					part.Rig.linearVelocity = Vector3.zero;
+					part.Rig.angularVelocity = Vector3.zero;
+				}
 			}
 			else if (part.transform != null)
 			{
@@ -862,13 +842,12 @@ public sealed class TumbleweedController : MonoBehaviour
 	// local view matches remote clients (which only receive a buried
 	// coordinate and never see the rider on the ball) - the camera follows
 	// the weed and the user just sees the tumbleweed rolling.
-	// ForceShowLocalRenderers is a safety net that turns every renderer under
-	// the local character back on at exit, covering renderers the game
-	// spawned while we were transformed (skin swaps, equipment, scene
-	// loading) that could otherwise be left off.
+	// Original renderer states are restored on exit so parts the game had
+	// already hidden stay hidden after leaving tumbleweed form.
 	// ------------------------------------------------------------------
 
 	private Renderer[] _localRenderers;
+	private readonly Dictionary<Renderer, bool> _localRendererStates = new Dictionary<Renderer, bool>();
 
 	private void HideLocalRenderers()
 	{
@@ -878,11 +857,13 @@ public sealed class TumbleweedController : MonoBehaviour
 		}
 		try
 		{
+			_localRendererStates.Clear();
 			_localRenderers = ((Component)_character).GetComponentsInChildren<Renderer>(true);
 			foreach (Renderer renderer in _localRenderers)
 			{
 				if (renderer != null)
 				{
+					_localRendererStates[renderer] = renderer.enabled;
 					renderer.enabled = false;
 				}
 			}
@@ -928,11 +909,21 @@ public sealed class TumbleweedController : MonoBehaviour
 			Renderer[] renderers = ((Component)_character).GetComponentsInChildren<Renderer>(true);
 			foreach (Renderer renderer in renderers)
 			{
-				if (renderer != null)
+				if (renderer == null)
+				{
+					continue;
+				}
+				if (_localRendererStates.TryGetValue(renderer, out bool wasEnabled))
+				{
+					renderer.enabled = wasEnabled;
+				}
+				else if (!renderer.enabled)
 				{
 					renderer.enabled = true;
 				}
 			}
+			_localRendererStates.Clear();
+			_localRenderers = null;
 		}
 		catch (Exception ex)
 		{
@@ -1210,8 +1201,12 @@ public sealed class TumbleweedController : MonoBehaviour
 				rig.position = Vector3.Lerp(rig.position, pos, 0.45f);
 				rig.rotation = Quaternion.Slerp(rig.rotation, rot, 0.45f);
 			}
-			rig.linearVelocity = vel;
-			rig.angularVelocity = ang;
+			// 远端刚体可能为 kinematic（位置已同步），设速度只在非 kinematic 时执行（避免 Unity 警告）。
+			if (!rig.isKinematic)
+			{
+				rig.linearVelocity = vel;
+				rig.angularVelocity = ang;
+			}
 		}
 		catch (Exception ex)
 		{

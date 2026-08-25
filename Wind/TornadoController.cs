@@ -8,30 +8,6 @@ using PhotonPlayer = Photon.Realtime.Player;
 
 namespace ImTornado;
 
-/// <summary>
-/// Runtime controller added to the local player's Character while they are in tornado form.
-/// Drives the game's own ragdoll rigidbodies so that CharacterSyncer keeps remote (even
-/// unmodded) clients in sync over Photon, exactly like the game's own hazards do.
-///
-/// EXECUTION-ORDER CONTRACT — do not change [DefaultExecutionOrder(600)] without reading this.
-/// This component deliberately runs late and relies on two vanilla execution-order assumptions:
-///
-///   1. Camera (LateUpdate): MainCameraMovement runs at DefaultExecutionOrder 500, i.e. BEFORE
-///      us, and pulls the camera onto the ragdoll head every LateUpdate. Running at 600 lets our
-///      LateUpdate override the camera onto the flying tornado AFTER the vanilla camera code,
-///      without any Harmony patches.
-///
-///   2. Physics (FixedUpdate): CharacterMovement.FixedUpdate integrates the game's movement and
-///      gravity forces onto the ragdoll. Our FixedUpdate must run AFTER it so the velocity we
-///      write in ApplyMovementVelocity / ApplyHoverVelocity / StabilizeRagdoll is what actually
-///      integrates for the frame. We also clear part.forcesToAdd and overwrite linear/angular
-///      velocity every physics step to win that race.
-///
-/// If a game update changes CharacterMovement's or MainCameraMovement's execution order, the
-/// tornado may stop flying or the camera may fight the vanilla camera. Verify these two
-/// orderings when upgrading for a new game build (Edit &gt; Project Settings &gt; Script Execution
-/// Order, or raise this controller's DefaultExecutionOrder).
-/// </summary>
 [DefaultExecutionOrder(600)]
 public sealed class TornadoController : MonoBehaviour
 {

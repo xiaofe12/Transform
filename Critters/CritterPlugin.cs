@@ -29,7 +29,7 @@ internal static class CritterPlugin
 {
 	public const string Id = "com.github.Thanks.Transform.Critter";
 	public const string Name = "Critter Forms";
-	public const string Version = "0.9.7";
+	public const string Version = "0.9.8";
 	private const float OldFrogJumpPowerDefault = 1.6f;
 	private const float PreviousFrogJumpPowerDefault = 0.85f;
 	private const float NewFrogJumpPowerDefault = 1.2f;
@@ -111,7 +111,7 @@ internal static class CritterPlugin
 		// with the old scene — revert before the new scene initializes its player.
 		SceneManager.sceneLoaded += OnSceneLoaded;
 
-		Log.LogInfo("[Critter] Module loaded (frog, beetle, scorpion, coconut, bomb, cactus forms).");
+		Log.LogInfo("[Critter] Module loaded (frog, beetle, scorpion, coconut and bomb forms).");
 	}
 
 	/// <summary>
@@ -210,7 +210,7 @@ internal static class CritterPlugin
 		BindKind(config, CritterKind.Coconut, 10f, 8f, 8f, 6f, 5f, 1f, 1.7f);
 		// Bomb rolls like the tumbleweed by default; RMB is the only fuse igniter.
 		BindKind(config, CritterKind.Bomb, 22f, 18f, 15.65f, 6f, 4f, 1f, 2f);
-		// Cactus rolls like coconut/bomb; RMB launches it at a player so vanilla cactus collision sticks.
+		// Cactus is bound only so old configs remain readable; the form is not exposed or enterable.
 		BindKind(config, CritterKind.Cactus, 18f, 14f, 12f, 6f, 4.5f, 1f, 1.8f);
 		MigrateCritterDefaults();
 		UnmoddedRoomSupport = config.Bind("Critter", "UnmoddedRoomSupport", true,
@@ -395,7 +395,7 @@ internal static class CritterPlugin
 		// 无本地角色可依附）时拒绝。
 		if (!Photon.Pun.PhotonNetwork.IsConnected && !Photon.Pun.PhotonNetwork.OfflineMode)
 		{
-			Log?.LogWarning("[Critter] Critter forms require a Photon room or offline mode.");
+			FormValidation.ReportFailure(Log, "Critter", "[Critter] Critter forms require a Photon room or offline mode.");
 			return false;
 		}
 		return true;
@@ -404,6 +404,11 @@ internal static class CritterPlugin
 	/// <summary>Enters the given critter form. Returns true when the controller accepted it.</summary>
 	internal static bool Enter(Character character, CritterKind kind)
 	{
+		if (kind == CritterKind.Cactus)
+		{
+			Log?.LogWarning("[Critter] Cactus form is disabled.");
+			return false;
+		}
 		if (_switching) return false;
 		if (!CanTransform(character)) return false;
 		_switching = true;

@@ -20,7 +20,7 @@ internal static class StatuePlugin
 {
 	public const string Id = "com.github.Thanks.Transform.Statue";
 	public const string Name = "Petrified Scout Form";
-	public const string Version = "0.9.7";
+	public const string Version = "0.9.8";
 
 	internal static ManualLogSource Log;
 
@@ -181,7 +181,7 @@ internal static class StatuePlugin
 	{
 		if (StatueController.IsLocalStatueCharacter(character))
 		{
-			Log?.LogWarning("[Statue] Already in statue form.");
+			FormValidation.ReportFailure(Log, "Statue", "[Statue] Already in statue form.");
 			return false;
 		}
 		return FormValidation.IsValid(Log, "Statue", FormValidation.ValidateTransformable(character));

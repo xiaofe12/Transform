@@ -426,30 +426,6 @@ internal static class FormRegistry
                 new ParamDescriptor("跳跃速度", "Jump speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Bomb), 1f, 30f),
                 new ParamDescriptor("点燃冷却", "Ignite cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Bomb), 0.1f, 10f)
             }
-        },
-        new FormDescriptor(
-            FormId.Cactus,
-            "仙人球", "Cactus Ball",
-            "WASD/方向键滚动 · Shift 加速 · 空格跳跃 · 右键瞄准玩家并扎上去",
-            "WASD/arrow keys roll · Shift sprint · Space jump · RMB launch and stick to player",
-            () => ImCritter.CritterPlugin.IsActive && ImCritter.CritterPlugin.ActiveKind == ImCritter.CritterKind.Cactus,
-            () => ImCritter.CritterPlugin.CanEnter(Character.localCharacter),
-            () => ImCritter.CritterPlugin.Enter(Character.localCharacter, ImCritter.CritterKind.Cactus),
-            ImCritter.CritterPlugin.Exit,
-            () => ImCritter.CritterPlugin.CameraDistance(ImCritter.CritterKind.Cactus),
-            () => ImCritter.CritterPlugin.CameraHeight(ImCritter.CritterKind.Cactus),
-            () => ImCritter.CritterPlugin.CameraFov(ImCritter.CritterKind.Cactus),
-            2f, 20f, 0.3f, 10f, 60f, 110f,
-            null)
-        {
-            Params =
-            {
-                new ParamDescriptor("推动力", "Movement force", () => ImCritter.CritterPlugin.MovementForce(ImCritter.CritterKind.Cactus), 0f, 60f),
-                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Cactus), 1f, 5f),
-                new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Cactus), 2f, 60f),
-                new ParamDescriptor("跳跃速度", "Jump speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Cactus), 1f, 30f),
-                new ParamDescriptor("发射冷却", "Launch cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Cactus), 0.1f, 10f)
-            }
         }
     };
 

@@ -44,8 +44,17 @@ namespace ImCritter;
 [HarmonyPatch]
 public static class CritterHarmonyPatches
 {
+	private const float ControlledFrogStopDistance = 2.6f;
+	private const float ControlledFrogPullMaxSpeed = 7f;
+	private const float ControlledFrogNearMaxSpeed = 2.5f;
+	private const float ControlledFrogPullMaxUpSpeed = 1.5f;
 	private static readonly HashSet<int> _hiddenRiderViewIds = new HashSet<int>();
 	private static readonly FieldInfo MobAttackingField = AccessTools.Field(typeof(Mob), "attacking");
+	private static readonly FieldInfo FrogTargetCharacterField = AccessTools.Field(typeof(FrogTongue), "_targetCharacter");
+	private static readonly FieldInfo FrogIsPullingField = AccessTools.Field(typeof(FrogTongue), "_isPulling");
+	private static readonly FieldInfo FrogTongueLengthField = AccessTools.Field(typeof(FrogTongue), "_tongueLength");
+	private static readonly FieldInfo FrogThrownField = AccessTools.Field(typeof(FrogTongue), "_thrown");
+	private static readonly MethodInfo FrogLetGoMethod = AccessTools.Method(typeof(FrogTongue), "LetGo");
 
 	// ------------------------------------------------------------------
 	// AI suppression on every modded client
@@ -142,6 +151,49 @@ public static class CritterHarmonyPatches
 		// there) — the FrogActionGuard below drops those on this client, and
 		// UpdateUnmoddedSync keeps their copy pinned to the rider.
 		return !CritterController.IsCritterView(__instance.photonView);
+	}
+
+	[HarmonyPatch(typeof(FrogTongue), "FixedUpdate")]
+	[HarmonyPostfix]
+	private static void FrogTongueFixedUpdatePostfix(FrogTongue __instance)
+	{
+		if (__instance == null || !CritterController.IsCritterView(__instance.photonView)) return;
+		try
+		{
+			bool pulling = FrogIsPullingField != null && (bool)FrogIsPullingField.GetValue(__instance);
+			if (!pulling) return;
+			Character target = FrogTargetCharacterField?.GetValue(__instance) as Character;
+			if (target == null) return;
+			Vector3 frogPos = __instance.dragPoint != null ? __instance.dragPoint.position : __instance.transform.position;
+			float distance = Vector3.Distance(frogPos, target.Center);
+			if (distance <= ControlledFrogStopDistance)
+			{
+				DampenPulledCharacter(target, ControlledFrogNearMaxSpeed, 0.5f);
+				FrogThrownField?.SetValue(__instance, false);
+				FrogLetGoMethod?.Invoke(__instance, null);
+				if (FrogTongueLengthField != null) FrogTongueLengthField.SetValue(__instance, 0f);
+				return;
+			}
+			DampenPulledCharacter(target, ControlledFrogPullMaxSpeed, ControlledFrogPullMaxUpSpeed);
+		}
+		catch
+		{
+		}
+	}
+
+	private static void DampenPulledCharacter(Character target, float maxSpeed, float maxUpSpeed)
+	{
+		CharacterRagdoll ragdoll = target != null && target.refs != null ? target.refs.ragdoll : null;
+		if (ragdoll == null || ragdoll.partList == null) return;
+		foreach (Bodypart part in ragdoll.partList)
+		{
+			Rigidbody rig = part != null ? part.Rig : null;
+			if (rig == null || rig.isKinematic) continue;
+			Vector3 velocity = Vector3.ClampMagnitude(rig.linearVelocity, maxSpeed);
+			if (velocity.y > maxUpSpeed) velocity.y = maxUpSpeed;
+			rig.linearVelocity = velocity;
+			rig.angularVelocity = Vector3.ClampMagnitude(rig.angularVelocity, 8f);
+		}
 	}
 
 	// ------------------------------------------------------------------

@@ -11,6 +11,7 @@ using Photon.Pun;
 using UnityEngine;
 using Object = UnityEngine.Object;
 using TransformHud = global::Transform.Core.TransformHud;
+using FormValidation = global::Transform.Core.FormValidation;
 
 namespace ImScoutmaster;
 
@@ -49,7 +50,6 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 	private const string ScoutmasterControlConfigSectionName = "Scoutmaster Control";
 	private const string CameraConfigSectionName = "Camera";
 	private const string PlayerRestoreConfigSectionName = "Player Restore";
-	private const string DiagnosticsConfigSectionName = "Diagnostics";
 	private const float CameraRestoreAssistSeconds = 0.4f;
 	private const float CameraHealSeconds = 8f;
 	private const float CameraHealMaxDistance = 100f;
@@ -1030,36 +1030,36 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 	{
 		if (sourceCharacter == null)
 		{
-			Log?.LogWarning("[I'm Scoutmaster] No local character found.");
+			FormValidation.ReportFailure(Log, "I'm Scoutmaster", "[I'm Scoutmaster] No local character found.");
 			return false;
 		}
 		if (sourceCharacter.data == null || sourceCharacter.refs == null || sourceCharacter.photonView == null)
 		{
-			Log?.LogWarning("[I'm Scoutmaster] Local character is not ready yet.");
+			FormValidation.ReportFailure(Log, "I'm Scoutmaster", "[I'm Scoutmaster] Local character is not ready yet.");
 			return false;
 		}
 		if (IsDeadForTransform(sourceCharacter))
 		{
-			Log?.LogWarning("[I'm Scoutmaster] Cannot transform after the player has died.");
+			FormValidation.ReportFailure(Log, "I'm Scoutmaster", "[I'm Scoutmaster] Cannot transform after the player has died.");
 			return false;
 		}
 		if (IsControlledScoutmasterCharacter(sourceCharacter))
 		{
-			Log?.LogWarning("[I'm Scoutmaster] Already controlling Scoutmaster.");
+			FormValidation.ReportFailure(Log, "I'm Scoutmaster", "[I'm Scoutmaster] Already controlling Scoutmaster.");
 			return false;
 		}
 		if (IsZombieOrZombified(sourceCharacter))
 		{
-			Log?.LogWarning("[I'm Scoutmaster] Cannot transform while the local character is in zombie form (I'm Zombie compatibility).");
+			FormValidation.ReportFailure(Log, "I'm Scoutmaster", "[I'm Scoutmaster] Cannot transform while the local character is in zombie form (I'm Zombie compatibility).");
 			return false;
 		}
-		// 防"变身后掉入地下"：机场大厅等非游戏场景/虚空位置没有真实（非角色、非触发器）地面，
-		// 领队物理激活后无支撑会坠落穿地。变身预检要求玩家位置下方存在可站立地面。
-		if (!TryFindStandingGroundBelow(sourceCharacter.Center, MaxTransformGroundProbeDistance, out _))
+		// 菜单每帧查询路径走短时缓存，避免每帧 RaycastAll 的 GC/CPU 开销。
+		if (!TryFindStandingGroundBelow(sourceCharacter.Center, MaxTransformGroundProbeDistance, out _, allowCache: true))
 		{
-			Log?.LogWarning("[I'm Scoutmaster] Cannot transform here: no standing ground below the player (airport lobby or void).");
+			FormValidation.ReportFailure(Log, "I'm Scoutmaster", "[I'm Scoutmaster] Cannot transform here: no standing ground below the player (airport lobby or void).");
 			return false;
 		}
+		FormValidation.ClearFailure("I'm Scoutmaster");
 		return true;
 	}
 
@@ -1068,14 +1068,30 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 	// 与 ResolveSourceStashPosition 的过滤规则保持一致，保证"能变身的地方必有可站立地面"。
 	private const float MaxTransformGroundProbeDistance = 40f;
 
-	private static bool TryFindStandingGroundBelow(Vector3 center, float maxDistance, out RaycastHit groundHit)
+	// ---- 地面探测短时缓存（菜单每帧查询专用）：查询路径 0.3s/2m 内复用结果，进入/恢复路径保持实时 ----
+	private const float GroundProbeCacheSeconds = 0.3f;
+	private const float GroundProbeCacheMaxMove = 2f;
+	private static float _groundProbeCachedTime = float.MinValue;
+	private static Vector3 _groundProbeCachedCenter;
+	private static bool _groundProbeCachedResult;
+	private static RaycastHit _groundProbeCachedHit;
+
+	private static bool TryFindStandingGroundBelow(Vector3 center, float maxDistance, out RaycastHit groundHit, bool allowCache = false)
 	{
 		groundHit = default(RaycastHit);
 		if (!IsFiniteVector(center) || !(maxDistance > 0f))
 		{
 			return false;
 		}
+		if (allowCache
+			&& Time.unscaledTime - _groundProbeCachedTime <= GroundProbeCacheSeconds
+			&& (center - _groundProbeCachedCenter).sqrMagnitude <= GroundProbeCacheMaxMove * GroundProbeCacheMaxMove)
+		{
+			groundHit = _groundProbeCachedHit;
+			return _groundProbeCachedResult;
+		}
 
+		bool found = false;
 		try
 		{
 			Vector3 origin = center + Vector3.up * 5f;
@@ -1097,13 +1113,20 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			if (bestHit.collider != null)
 			{
 				groundHit = bestHit;
-				return true;
+				found = true;
 			}
 		}
 		catch
 		{
 		}
-		return false;
+		if (allowCache)
+		{
+			_groundProbeCachedTime = Time.unscaledTime;
+			_groundProbeCachedCenter = center;
+			_groundProbeCachedResult = found;
+			_groundProbeCachedHit = groundHit;
+		}
+		return found;
 	}
 
 	private static bool IsZombieOrZombified(Character character)

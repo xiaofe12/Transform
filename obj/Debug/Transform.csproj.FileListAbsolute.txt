@@ -1,0 +1,8 @@
+D:\Mod Projects\Transform\bin\Debug\Thanks.Transform.dll
+D:\Mod Projects\Transform\bin\Debug\Thanks.Transform.pdb
+D:\Mod Projects\Transform\obj\Debug\Transform.csproj.AssemblyReference.cache
+D:\Mod Projects\Transform\obj\Debug\Transform.GeneratedMSBuildEditorConfig.editorconfig
+D:\Mod Projects\Transform\obj\Debug\Transform.csproj.CoreCompileInputs.cache
+D:\Mod Projects\Transform\obj\Debug\Transform.sourcelink.json
+D:\Mod Projects\Transform\obj\Debug\Thanks.Transform.dll
+D:\Mod Projects\Transform\obj\Debug\Thanks.Transform.pdb

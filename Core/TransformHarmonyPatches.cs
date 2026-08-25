@@ -77,6 +77,24 @@ internal static class TransformHarmonyPatches
         return !IsLocalTransformedCharacter(___character);
     }
 
+    [HarmonyPatch(typeof(CharacterItems), "Update")]
+    [HarmonyFinalizer]
+    private static Exception CharacterItemsUpdateFinalizer(Exception __exception, Character ___character)
+    {
+        if (__exception == null) return null;
+        if (!(__exception is NullReferenceException)) return __exception;
+        if (TransformState.AnyFormActive) return null;
+        if (___character == null || ___character.data == null || ___character.refs == null) return null;
+        return __exception;
+    }
+
+    [HarmonyPatch(typeof(CharacterCarrying), "StartCarry")]
+    [HarmonyPrefix]
+    private static bool CharacterCarryingStartCarryPrefix(Character ___character, Character target)
+    {
+        return CarryGuard.CanStartCarry(___character, target);
+    }
+
     // CharacterHeatEmission.Update iterates the character list; form transitions can add/remove
     // entries mid-iteration (see the old out.txt session log). Swallow the failure only while a
     // form is active — one missed heat tick is harmless, an unhandled exception every frame is not.

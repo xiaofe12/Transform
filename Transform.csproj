@@ -122,6 +122,7 @@
     <Compile Include="Core\TransformState.cs" />
     <Compile Include="Core\RoomPolicy.cs" />
     <Compile Include="Core\GameInput.cs" />
+    <Compile Include="Core\CarryGuard.cs" />
     <Compile Include="Core\TransformHud.cs" />
     <Compile Include="Core\TransformHarmonyPatches.cs" />
     <Compile Include="Core\PatchUtility.cs" />

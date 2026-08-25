@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- 游戏安装根目录：Transform.csproj 中所有 HintPath 都基于 $(PEAKRoot)。
+         注：本文件曾被清理删除导致构建引用解析失败（CS0246 洪泛），已于 2026-08-25 重建。 -->
+    <PEAKRoot>D:\Steam\steamapps\common\PEAK</PEAKRoot>
+  </PropertyGroup>
+</Project>

@@ -6,27 +6,6 @@ using UnityEngine;
 
 namespace ImZombie;
 
-/// <summary>
-/// Compatibility guard for third-party status-bar mods (PeakStats, PeakStamina/peakstamina by
-/// lstrings, PlayersInfo). These mods build stamina bars for every Character in
-/// Character.AllCharacters and read <c>observedCharacter.refs.customization.PlayerColor</c> /
-/// <c>localCharacter.refs.stats</c> per frame. While the Transform mod is active the local
-/// character can be swapped to the controlled zombie (an NPC-prefab Character whose
-/// refs.customization may be null) and remote transformed players appear as NPC characters too —
-/// the status mods then throw NullReferenceException every frame.
-///
-/// The guard patches each mod's per-frame methods with prefixes that skip processing for
-/// characters whose refs would NRE (customization/stats missing) or that belong to our forms
-/// (active zombie / parked player body). It also blocks CharacterStaminaBar.AnimateEnable/
-/// AnimateDisable while a Transform form has the HUD deactivated — the mod's StartCoroutine
-/// on the inactive "Bar(Clone)" otherwise errors every frame. Types are resolved lazily via
-/// reflection because the mods may load after us; ZombiePlugin.Tick retries the install
-/// every couple of seconds.
-///
-/// PlayersInfo wraps all of its Update bodies in try/catch with throttled error logging, so it
-/// cannot crash — we still guard TeammateBarDriver.Update to cut its error spam while a
-/// transformed player is on screen.
-/// </summary>
 internal static class StatusBarGuard
 {
     private const BindingFlags InstanceFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
@@ -339,6 +318,9 @@ internal static class StatusBarGuard
 
     private static bool ManagerUpdatePrefix()
     {
+        // 任意 Transform 形态激活时跳过：被控制角色 refs.customization 可能为 null，
+        // PeakStatsEx 每帧读它会 NRE 刷屏（僵尸/领队等形态均实测触发）。纯本地显示，网络无关。
+        if (global::Transform.Core.FormRegistry.AnyActive) return false;
         Character local = Character.localCharacter;
         if (local == null) return false;
         if (MainCameraMovement.IsSpectating && MainCameraMovement.specCharacter == null) return false;

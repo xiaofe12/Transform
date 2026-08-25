@@ -62,6 +62,7 @@ public sealed class StatueController : MonoBehaviour
 	private Vector3 _lastKnownStatueAnchor;
 	private bool _restoreAtTransformEntryOnExit;
 	private Renderer[] _localRenderers;
+	private readonly Dictionary<Renderer, bool> _localRendererStates = new Dictionary<Renderer, bool>();
 	private readonly List<KeyValuePair<Rigidbody, RigidbodyInterpolation>> _savedInterpolations =
 		new List<KeyValuePair<Rigidbody, RigidbodyInterpolation>>();
 
@@ -359,8 +360,12 @@ public sealed class StatueController : MonoBehaviour
 		{
 			if (part == null || part.Rig == null) continue;
 			part.Rig.position += delta;
-			part.Rig.linearVelocity = Vector3.zero;
-			part.Rig.angularVelocity = Vector3.zero;
+			// kinematic 刚体设速度是 no-op 且每帧刷警告，跳过。
+			if (!part.Rig.isKinematic)
+			{
+				part.Rig.linearVelocity = Vector3.zero;
+				part.Rig.angularVelocity = Vector3.zero;
+			}
 		}
 	}
 
@@ -774,8 +779,12 @@ public sealed class StatueController : MonoBehaviour
 			if (part.Rig != null)
 			{
 				part.Rig.position += delta;
-				part.Rig.linearVelocity = Vector3.zero;
-				part.Rig.angularVelocity = Vector3.zero;
+				// 定位前刚体仍为 kinematic，设速度只刷警告。
+				if (!part.Rig.isKinematic)
+				{
+					part.Rig.linearVelocity = Vector3.zero;
+					part.Rig.angularVelocity = Vector3.zero;
+				}
 			}
 			else if (part.transform != null)
 			{
@@ -880,7 +889,7 @@ public sealed class StatueController : MonoBehaviour
 
 	// ------------------------------------------------------------------
 	// Local visuals: hidden while transformed so the local view matches
-	// remote clients; ForceShowLocalRenderers is the exit safety net.
+	// remote clients; original renderer states are restored on exit.
 	// ------------------------------------------------------------------
 
 	private void HideLocalRenderers()
@@ -888,10 +897,13 @@ public sealed class StatueController : MonoBehaviour
 		if (_character == null) return;
 		try
 		{
+			_localRendererStates.Clear();
 			_localRenderers = ((Component)_character).GetComponentsInChildren<Renderer>(true);
 			foreach (Renderer renderer in _localRenderers)
 			{
-				if (renderer != null) renderer.enabled = false;
+				if (renderer == null) continue;
+				_localRendererStates[renderer] = renderer.enabled;
+				renderer.enabled = false;
 			}
 		}
 		catch (Exception ex)
@@ -924,8 +936,18 @@ public sealed class StatueController : MonoBehaviour
 			Renderer[] renderers = ((Component)_character).GetComponentsInChildren<Renderer>(true);
 			foreach (Renderer renderer in renderers)
 			{
-				if (renderer != null) renderer.enabled = true;
+				if (renderer == null) continue;
+				if (_localRendererStates.TryGetValue(renderer, out bool wasEnabled))
+				{
+					renderer.enabled = wasEnabled;
+				}
+				else if (!renderer.enabled)
+				{
+					renderer.enabled = true;
+				}
 			}
+			_localRendererStates.Clear();
+			_localRenderers = null;
 		}
 		catch (Exception ex)
 		{

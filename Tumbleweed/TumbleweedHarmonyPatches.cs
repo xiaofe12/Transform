@@ -7,28 +7,9 @@ using UnityEngine;
 
 namespace ImTumbleweed;
 
-/// <summary>
-/// While the local player is in tumbleweed form:
-///  - the spawned weed's vanilla chase AI, self-destruct timer and scale-in animation are
-///    suppressed on every modded client (identified through the PhotonView.InstantiationData
-///    marker), so the weed is fully player-driven and stays alive while transformed;
-///  - collisions between the weed and the driving character's ragdoll are ignored on every
-///    modded client (the character root follows the weed);
-///  - the weed player's death / pass-out / warp / fall RPCs are blocked so hazards cannot
-///    harm them while transformed.
-///
-/// The vanilla OnCollisionEnter knockdown/thorn behaviour is deliberately kept: rolling
-/// into other players knocks them down, exactly like the real hazard. Unmodded clients
-/// are unaffected: they run the vanilla TumbleWeed scripts, but the chase AI is gated
-/// behind photonView.IsMine, so a remote unmodded client just renders the synced weed
-/// (the prefab's PhotonRigidbodyView replicates its physics from the owner).
-/// </summary>
 [HarmonyPatch]
 public static class TumbleweedHarmonyPatches
 {
-	/// <summary>Per-weed bookkeeping for instances spawned by this mod. Held via
-	/// ConditionalWeakTable so entries die with the destroyed weeds instead of leaking
-	/// across scenes.</summary>
 	private sealed class WeedState
 	{
 		public PhotonView View;

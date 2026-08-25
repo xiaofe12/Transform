@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using BepInEx.Logging;
 
 namespace Transform.Core;
@@ -8,6 +9,26 @@ namespace Transform.Core;
 /// </summary>
 internal static class FormValidation
 {
+	/// <summary>模块标签 → 最近失败消息。同键消息"沿变沿打"去重（菜单每帧查询会重复调用），恢复后再次失败重新记录。</summary>
+	private static readonly Dictionary<string, string> _lastFailureByKey = new Dictionary<string, string>();
+
+	/// <summary>记录一次失败；与上次相同则静默（菜单每帧查询去重）。</summary>
+	internal static void ReportFailure(ManualLogSource log, string key, string message)
+	{
+		if (_lastFailureByKey.TryGetValue(key, out string last) && last == message)
+		{
+			return;
+		}
+		_lastFailureByKey[key] = message;
+		log?.LogWarning(message);
+	}
+
+	/// <summary>条件恢复时清除失败状态，使下一次失败能重新记录。</summary>
+	internal static void ClearFailure(string key)
+	{
+		_lastFailureByKey.Remove(key);
+	}
+
 	/// <summary>
 	/// 校验角色是否处于可变身的基础状态：非空、数据就绪、未死亡/未晕倒/未攀爬。
 	/// checkSpecialForm=false 时跳过"是否已处于其它特殊形态"检查（Zombie 模块原实现不含此检查，
@@ -41,13 +62,16 @@ internal static class FormValidation
 		return null;
 	}
 
-	/// <summary>让模块在通过基础校验后，用统一的日志格式记录一次被拒原因。
-	/// 返回 true 表示校验通过（reason 为 null）。</summary>
+	/// <summary>记录一次被拒原因（经 ReportFailure 去重）。返回 true 表示通过。</summary>
 	internal static bool IsValid(ManualLogSource log, string moduleTag, string reason)
 	{
 		if (reason != null)
 		{
-			log?.LogWarning("[" + moduleTag + "] " + reason);
+			ReportFailure(log, moduleTag, "[" + moduleTag + "] " + reason);
+		}
+		else
+		{
+			ClearFailure(moduleTag);
 		}
 		return reason == null;
 	}
