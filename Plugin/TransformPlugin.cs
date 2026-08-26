@@ -32,7 +32,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.github.Thanks.Transform";
     public const string PluginName = "Transform";
-    public const string PluginVersion = "0.9.8";
+    public const string PluginVersion = "0.9.10";
 
     internal static TransformPlugin Instance { get; private set; }
     internal static ManualLogSource Log { get; private set; }
@@ -48,6 +48,8 @@ public sealed class TransformPlugin : BaseUnityPlugin
     private const float ExternalCameraRecoverySeconds = 1.0f;
     private const float ExternalCameraRepairMaxDistance = 35f;
     private const float DefaultPlayerCameraFov = 70f;
+    private const int FormSwitchRestoreFrames = 6;
+    private const float AsyncFormEnterWaitSeconds = 3f;
 
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -278,7 +280,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
         return active != null && active != target;
     }
 
-    /// <summary>Enters the requested form, exiting the active one first when switching.</summary>
+    /// <summary>Enters the requested form. If another form is active, it is fully restored first.</summary>
     internal void RequestEnterForm(Core.FormId formId)
     {
         if (_enteringForm) return;
@@ -298,17 +300,15 @@ public sealed class TransformPlugin : BaseUnityPlugin
         {
             if (Core.FormRegistry.AnyActive)
             {
-                Log.LogInfo("[Transform] Switching forms — exiting the active form first.");
+                Log.LogInfo("[Transform] Switching forms - restoring the active form first.");
                 Core.FormRegistry.ExitActiveForm();
-                StabilizeLocalCharacterForFormSwitch("after exit");
-                // Two frames for the exit to fully restore Character.localCharacter before the
-                // next form validates the character state (some exits restore over LateUpdate).
-                // Clear velocity across those frames so the next form does not inherit a leap,
-                // hop, throw, or dash impulse and launch the player upward while switching.
-                yield return null;
-                StabilizeLocalCharacterForFormSwitch("after first exit frame");
-                yield return null;
-                StabilizeLocalCharacterForFormSwitch("before enter");
+                BeginPostRestoreRecovery("form switch");
+                yield return WaitForFormSwitchRestore();
+                if (Core.FormRegistry.AnyActive)
+                {
+                    Log.LogWarning("[Transform] Form switch aborted because the previous form is still active.");
+                    yield break;
+                }
             }
 
             Core.FormRegistry.FormDescriptor target = null;
@@ -332,6 +332,15 @@ public sealed class TransformPlugin : BaseUnityPlugin
 
             if (entered)
             {
+                yield return WaitForAsyncFormEnter(target.Id);
+                if (target.Id == Core.FormId.Scoutmaster)
+                {
+                    entered = ImScoutmaster.Plugin.Instance != null && ImScoutmaster.Plugin.Instance.IsFormActive;
+                }
+            }
+
+            if (entered)
+            {
                 _lastFormId = target.Id;
                 Log.LogInfo("[Transform] Entered form: " + target.Name);
             }
@@ -344,6 +353,37 @@ public sealed class TransformPlugin : BaseUnityPlugin
         {
             _enteringForm = false;
         }
+    }
+
+    private IEnumerator WaitForAsyncFormEnter(Core.FormId formId)
+    {
+        if (formId != Core.FormId.Scoutmaster)
+        {
+            yield break;
+        }
+
+        ImScoutmaster.Plugin scoutmaster = ImScoutmaster.Plugin.Instance;
+        if (scoutmaster == null)
+        {
+            yield break;
+        }
+
+        float until = Time.unscaledTime + AsyncFormEnterWaitSeconds;
+        while (scoutmaster.IsSwitching && Time.unscaledTime <= until)
+        {
+            yield return null;
+        }
+    }
+
+    private IEnumerator WaitForFormSwitchRestore()
+    {
+        for (int i = 0; i < FormSwitchRestoreFrames; i++)
+        {
+            StabilizeLocalCharacterForFormSwitch("form switch restore frame " + i);
+            yield return null;
+        }
+        yield return new WaitForFixedUpdate();
+        StabilizeLocalCharacterForFormSwitch("before enter");
     }
 
     private void StabilizeLocalCharacterForFormSwitch(string phase)
@@ -387,6 +427,11 @@ public sealed class TransformPlugin : BaseUnityPlugin
     /// <summary>Restores the player's original form.</summary>
     internal void RequestRestore()
     {
+        if (_enteringForm)
+        {
+            Log.LogWarning("[Transform] Restore ignored while a form switch is already in progress.");
+            return;
+        }
         if (!Core.FormRegistry.ExitActiveForm())
         {
             Log.LogWarning("[Transform] Restore requested but no form is active.");
@@ -740,4 +785,3 @@ public sealed class TransformPlugin : BaseUnityPlugin
         }
     }
 }
-

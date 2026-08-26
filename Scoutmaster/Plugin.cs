@@ -50,6 +50,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 	private const string ScoutmasterControlConfigSectionName = "Scoutmaster Control";
 	private const string CameraConfigSectionName = "Camera";
 	private const string PlayerRestoreConfigSectionName = "Player Restore";
+	private const float RestoreHeightOffset = 0.6f;
 	private const float CameraRestoreAssistSeconds = 0.4f;
 	private const float CameraHealSeconds = 8f;
 	private const float CameraHealMaxDistance = 100f;
@@ -910,6 +911,9 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 
 	/// <summary>True while the local player is in the controlled-scoutmaster form.</summary>
 	internal bool IsFormActive => _session?.IsActive == true;
+
+	/// <summary>True while the Scoutmaster form is still entering or exiting asynchronously.</summary>
+	internal bool IsSwitching => _switching;
 
 	/// <summary>State gate shared with the unified menu: may the local player enter this form now?</summary>
 	internal bool CanEnterScoutmasterForm()
@@ -5356,7 +5360,6 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 
 		private static Vector3 ResolveSafeRestorePosition(Vector3 requestedPosition, Character scoutmasterCharacter, Character sourceCharacter, Vector3 fallbackPosition, Vector3 sourceStashPosition)
 		{
-			float groundOffset = Mathf.Clamp(RestoreGroundOffset.Value, 0.2f, 5f);
 			Vector3 anchor = IsFiniteVector(requestedPosition) ? requestedPosition : fallbackPosition;
 			if (IsStashRestoreAnchor(anchor, sourceStashPosition, fallbackPosition))
 			{
@@ -5367,47 +5370,11 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			{
 				anchor = sourceCharacter != null ? ((Component)sourceCharacter).transform.position : Vector3.zero;
 			}
-
-			// 先检查当前童军领队位置附近的脚下地面；只接受不高于角色中心的地面。
-			// 若当前位置不安全，再回退到变身起点附近，避免被头顶可站立面吸上去。
-			float anchorMaxGroundY = anchor.y + GroundProbeMaxAboveCenter;
-			float fallbackMaxGroundY = IsFiniteVector(fallbackPosition)
-				? fallbackPosition.y + GroundProbeMaxAboveCenter
-				: float.PositiveInfinity;
-			if (TryFindRestoreGround(anchor + Vector3.up * 5f, 30f, scoutmasterCharacter, sourceCharacter, anchorMaxGroundY, out RaycastHit hit)
-				|| TryFindRestoreGround(anchor + Vector3.up * 12f, 80f, scoutmasterCharacter, sourceCharacter, anchorMaxGroundY, out hit)
-				|| TryFindRestoreGround(fallbackPosition + Vector3.up * 5f, 60f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit)
-				|| TryFindRestoreGround(fallbackPosition + Vector3.up * 60f, 200f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit))
+			if (IsStashRestoreAnchor(anchor, sourceStashPosition, fallbackPosition))
 			{
-				Vector3 candidate = hit.point + Vector3.up * groundOffset;
-				if (!IsStashRestoreAnchor(candidate, sourceStashPosition, fallbackPosition))
-				{
-					return candidate;
-				}
-
-				Log?.LogWarning("[I'm Scoutmaster] Restore ground resolved near the hidden source stash; retrying from transform start.");
-				if (TryFindRestoreGround(fallbackPosition + Vector3.up * 5f, 60f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit)
-					|| TryFindRestoreGround(fallbackPosition + Vector3.up * 60f, 200f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit))
-				{
-					return hit.point + Vector3.up * groundOffset;
-				}
+				anchor = IsFiniteVector(fallbackPosition) ? fallbackPosition : anchor + Vector3.up * Mathf.Max(SourceStashDistance.Value, 10f);
 			}
-
-			// 4 次 raycast 全部失败：anchor 极大概率位于虚空（飞出地图/坠入深渊）。
-			// 此时绝不能把玩家恢复到 anchor，必须回退到变身起点 fallbackPosition；
-			// 如果连 fallbackPosition 都无效，再退到 sourceCharacter 当前位置作为最后保底。
-			Vector3 safeFallback = IsFiniteVector(fallbackPosition) ? fallbackPosition : anchor;
-			if (sourceCharacter != null && !IsFiniteVector(safeFallback))
-			{
-				safeFallback = ((Component)sourceCharacter).transform.position;
-			}
-			if (IsStashRestoreAnchor(safeFallback, sourceStashPosition, fallbackPosition))
-			{
-				safeFallback = IsFiniteVector(fallbackPosition) ? fallbackPosition : safeFallback + Vector3.up * Mathf.Max(SourceStashDistance.Value, 10f);
-			}
-
-			Log?.LogWarning("[I'm Scoutmaster] No restore ground found below or above anchor " + anchor + "; restoring at safe fallback " + safeFallback + " instead.");
-			return safeFallback + Vector3.up * groundOffset;
+			return anchor + Vector3.up * RestoreHeightOffset;
 		}
 
 		private static bool IsStashRestoreAnchor(Vector3 candidate, Vector3 stashPosition, Vector3 transformStartPosition)
@@ -5428,131 +5395,6 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			return (stashColumnDistance <= 8f || startColumnDistance <= 8f)
 				&& buriedDepth >= 8f
 				&& stashDepthDelta <= Mathf.Max(SourceStashDistance.Value, 10f) + 20f;
-		}
-
-		// 向上 raycast：用于 anchor 已掉到地图深处（虚空）的场景。
-		// 此时向下 raycast 永远不会命中真实地面，必须向上才能找到玩家头顶的地形。
-		private static bool TryFindRestoreGroundUpward(Vector3 origin, float distance, Character scoutmasterCharacter, Character sourceCharacter, out RaycastHit groundHit)
-		{
-			groundHit = default;
-			if (!IsFiniteVector(origin))
-			{
-				return false;
-			}
-
-			RaycastHit[] hits;
-			try
-			{
-				hits = Physics.RaycastAll(origin, Vector3.up, distance, ~0, QueryTriggerInteraction.Ignore);
-			}
-			catch
-			{
-				return false;
-			}
-
-			// 取最近的一个有效地面（向上 raycast 命中的第一个就是 anchor 上方最近的地形底面）。
-			Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
-			foreach (RaycastHit hit in hits)
-			{
-				if (hit.collider == null || hit.collider.isTrigger)
-				{
-					continue;
-				}
-				// 向上 raycast 命中的是地形底面，法线朝下；跳过法线朝上（Dot > 0.2）的天花板。
-				if (Vector3.Dot(hit.normal, Vector3.up) > 0.2f)
-				{
-					continue;
-				}
-				if (IsRestoreIgnoredCollider(hit.collider, scoutmasterCharacter, sourceCharacter))
-				{
-					continue;
-				}
-
-				// 命中地形底面后，再从该点上方做一次向下 raycast 找到地表顶面，
-				// 否则把玩家恢复到 hit.point 会卡在地形内部（地形有厚度）。
-				Vector3 topProbe = hit.point + Vector3.up * 12f;
-				if (TryFindRestoreGround(topProbe, 30f, scoutmasterCharacter, sourceCharacter, float.PositiveInfinity, out RaycastHit topHit))
-				{
-					groundHit = topHit;
-				}
-				else
-				{
-					groundHit = hit;
-				}
-				return true;
-			}
-
-			return false;
-		}
-
-		private static bool TryFindRestoreGround(Vector3 origin, float distance, Character scoutmasterCharacter, Character sourceCharacter, float maxGroundY, out RaycastHit groundHit)
-		{
-			groundHit = default;
-			if (!IsFiniteVector(origin))
-			{
-				return false;
-			}
-
-			RaycastHit[] hits;
-			try
-			{
-				hits = Physics.RaycastAll(origin, Vector3.down, distance, ~0, QueryTriggerInteraction.Ignore);
-			}
-			catch
-			{
-				return false;
-			}
-
-			Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
-			foreach (RaycastHit hit in hits)
-			{
-				if (hit.collider == null || hit.collider.isTrigger)
-				{
-					continue;
-				}
-				if (hit.point.y > maxGroundY)
-				{
-					continue;
-				}
-				// 阈值放宽到 -0.2（接受法线与 up 夹角 < ~101° 的表面）。
-				// PEAK 地形（火山口、Alpine 陡崖）常出现坡度 > 78° 的可站立斜坡，
-				// 旧阈值 0.2 会把它们当作"非地面"跳过，明明脚下有地面却进入虚空回退。
-				if (Vector3.Dot(hit.normal, Vector3.up) < -0.2f)
-				{
-					continue;
-				}
-				if (IsRestoreIgnoredCollider(hit.collider, scoutmasterCharacter, sourceCharacter))
-				{
-					continue;
-				}
-
-				groundHit = hit;
-				return true;
-			}
-
-			return false;
-		}
-
-		private static bool IsRestoreIgnoredCollider(Collider collider, Character scoutmasterCharacter, Character sourceCharacter)
-		{
-			if (collider == null)
-			{
-				return true;
-			}
-
-			UnityEngine.Transform colliderTransform = collider.transform;
-			return IsColliderOwnedBy(colliderTransform, scoutmasterCharacter) || IsColliderOwnedBy(colliderTransform, sourceCharacter);
-		}
-
-		private static bool IsColliderOwnedBy(UnityEngine.Transform colliderTransform, Character character)
-		{
-			if (colliderTransform == null || character == null)
-			{
-				return false;
-			}
-
-			UnityEngine.Transform characterTransform = ((Component)character).transform;
-			return colliderTransform == characterTransform || colliderTransform.IsChildOf(characterTransform);
 		}
 
 		private static bool IsFiniteVector(Vector3 value)
@@ -6819,5 +6661,3 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 		}
 	}
 }
-
-

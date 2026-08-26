@@ -87,6 +87,13 @@ public static class ZombieHarmonyPatches
         return IsZombieVisual(zombie) || IsActiveLocalZombie(zombie);
     }
 
+    private static bool IsManagedZombieObject(MushroomZombie zombie)
+    {
+        if (IsPlayerControlledZombie(zombie)) return true;
+        GameObject obj = zombie != null ? zombie.gameObject : null;
+        return obj != null && obj.name != null && obj.name.StartsWith("ImZombie", StringComparison.Ordinal);
+    }
+
     private static bool IsZombie(Character character)
     {
         return character != null && ZombieController.ActiveZombieCharacter == character;
@@ -402,6 +409,13 @@ public static class ZombieHarmonyPatches
     {
         if (IsPlayerControlledZombie(__instance))
             ZombieController.ApplyNetworkedZombieAppearance(__instance);
+    }
+
+    [HarmonyPatch(typeof(MushroomZombie), "OnDestroy")]
+    [HarmonyPrefix]
+    private static bool MushroomZombieOnDestroyPrefix(MushroomZombie __instance)
+    {
+        return !IsManagedZombieObject(__instance);
     }
 
     // ---------------------------------------------------------------

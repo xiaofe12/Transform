@@ -29,7 +29,7 @@ internal static class CritterPlugin
 {
 	public const string Id = "com.github.Thanks.Transform.Critter";
 	public const string Name = "Critter Forms";
-	public const string Version = "0.9.8";
+	public const string Version = "0.9.10";
 	private const float OldFrogJumpPowerDefault = 1.6f;
 	private const float PreviousFrogJumpPowerDefault = 0.85f;
 	private const float NewFrogJumpPowerDefault = 1.2f;

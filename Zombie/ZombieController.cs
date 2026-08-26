@@ -128,7 +128,7 @@ public sealed class ZombieController : MonoBehaviour
     private const float ZombiePoolDepth = 80f;
     private const float EntryVerticalStabilizeSeconds = 0.8f;
     private const float EntryMaxUpwardDrift = 0.75f;
-    private const float RestoreMaxAboveGround = 0.75f;
+    private const float RestoreHeightOffset = 0.6f;
     private const float GroundProbeMaxAboveCenter = 0.25f;
 
     // Input edge detection
@@ -2527,15 +2527,9 @@ public sealed class ZombieController : MonoBehaviour
     private void CaptureEntryGroundReference(Character character)
     {
         _entryPlayerCenter = character != null ? character.Center : Vector3.zero;
-        _entryCenterGroundOffset = 1f;
-        _entryGroundReferenceValid = false;
+        _entryCenterGroundOffset = RestoreHeightOffset;
+        _entryGroundReferenceValid = IsFiniteVector(_entryPlayerCenter);
         _entryVerticalStabilizeUntil = Time.unscaledTime + EntryVerticalStabilizeSeconds;
-
-        if (character != null && TryFindGroundBelow(_entryPlayerCenter, character, null, 5f, 30f, out RaycastHit groundHit))
-        {
-            _entryCenterGroundOffset = Mathf.Clamp(_entryPlayerCenter.y - groundHit.point.y, 0.35f, 3.5f);
-            _entryGroundReferenceValid = true;
-        }
     }
 
     private void MaintainEntryVerticalStability()
@@ -2546,12 +2540,6 @@ public sealed class ZombieController : MonoBehaviour
         if (!IsFiniteVector(center)) return;
 
         float maxCenterY = _entryPlayerCenter.y + EntryMaxUpwardDrift;
-        if (TryFindGroundBelow(center, _zombieCharacter, _playerCharacter, 6f, 20f, out RaycastHit groundHit))
-        {
-            float expectedCenterY = groundHit.point.y + (_entryGroundReferenceValid ? _entryCenterGroundOffset : 1f);
-            maxCenterY = Mathf.Min(maxCenterY, expectedCenterY + EntryMaxUpwardDrift);
-        }
-
         if (center.y <= maxCenterY) return;
 
         Vector3 clampedCenter = new Vector3(center.x, maxCenterY, center.z);
@@ -2562,26 +2550,7 @@ public sealed class ZombieController : MonoBehaviour
     private Vector3 ResolveRestorePositionFromZombie(Vector3 zombieCenter)
     {
         if (!IsFiniteVector(zombieCenter)) return zombieCenter;
-        if (!TryFindGroundBelow(zombieCenter, _zombieCharacter, _playerCharacter, 6f, 40f, out RaycastHit groundHit))
-        {
-            return zombieCenter;
-        }
-
-        float desiredCenterY = groundHit.point.y + (_entryGroundReferenceValid ? _entryCenterGroundOffset : 1f);
-        if (_entryGroundReferenceValid)
-        {
-            float maxRestoreY = _entryPlayerCenter.y + EntryMaxUpwardDrift;
-            if (desiredCenterY > maxRestoreY)
-            {
-                desiredCenterY = maxRestoreY;
-            }
-        }
-
-        if (zombieCenter.y > desiredCenterY + RestoreMaxAboveGround || zombieCenter.y < desiredCenterY - 0.5f)
-        {
-            return new Vector3(zombieCenter.x, desiredCenterY, zombieCenter.z);
-        }
-        return zombieCenter;
+        return zombieCenter + Vector3.up * RestoreHeightOffset;
     }
 
     private static bool TryFindGroundBelow(Vector3 center, Character ignoreA, Character ignoreB, float probeUp, float probeDown, out RaycastHit groundHit)

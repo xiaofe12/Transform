@@ -1,11 +1,12 @@
 ## PEAK Transform
 
+- Special thanks to JoeDummy001 for doing a lot of testing and uncovering numerous bugs in this mod.
 - To prevent the original transformation mod from ruining the gameplay experience for other players in PEAK, a host‑authoritative integrated mod **PEAK Transform** has been created.
 - The original standalone mods are discontinued and will no longer be maintained. All new features, bug fixes and version updates will be released exclusively within this unified mod.
 
 ## Mod Compatibility
 
-- com.github.megalon.peakcinema
+- peakcinema
 - PeakSpectatorMode
 
 - PeakStatsEx

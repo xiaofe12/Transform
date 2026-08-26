@@ -51,19 +51,11 @@ public sealed class CritterController : MonoBehaviour
 	private const float CoconutSlamUpBias = 0.16f;
 	private const float FrogPullStopDistance = 2.6f;
 	private const float BreakRestoreItemRestoreDelaySeconds = 1f;
+	private const float RestoreHeightOffset = 0.6f;
 	private const float ControlledLinearDamping = 0.05f;
 	private const float ControlledAngularDamping = 8f;
 	private const float MovementInputDeadzone = 0.01f;
 	private const float FrogNormalHorizontalLaunchScale = 0.55f;
-	private const float ExitGroundMinNormalY = 0.45f;
-	private const float ExitCapsuleRadius = 0.45f;
-	private const float ExitCapsuleBottom = 0.15f;
-	private const float ExitCapsuleTop = 1.85f;
-	private const float ExitLocalProbeUp = 2.5f;
-	private const float ExitLocalProbeDown = 8f;
-	private const float ExitBroadProbeHeight = 12f;
-	private const float ExitBroadProbeDepth = 28f;
-	private const float ExitMaxSurfaceRise = 4f;
 	/// <summary>Landing grace window: after the last confirmed ground contact, a hop pressed
 	/// within this many seconds still fires (covers the landing-bounce frames where a strict
 	/// grounded check flickers).</summary>
@@ -81,26 +73,6 @@ public sealed class CritterController : MonoBehaviour
 	private static readonly FieldInfo ItemLastThrownTimeField = AccessTools.Field(typeof(Item), "lastThrownTime");
 	private static readonly MethodInfo ItemForceSyncForFramesMethod = AccessTools.Method(typeof(Item), "ForceSyncForFrames");
 	private static readonly Dictionary<Type, bool> HasSetKinematicRpcByComponentType = new Dictionary<Type, bool>();
-	private static readonly Vector3[] ExitSearchOffsets =
-	{
-		Vector3.zero,
-		new Vector3(0.8f, 0f, 0f),
-		new Vector3(-0.8f, 0f, 0f),
-		new Vector3(0f, 0f, 0.8f),
-		new Vector3(0f, 0f, -0.8f),
-		new Vector3(1.6f, 0f, 0f),
-		new Vector3(-1.6f, 0f, 0f),
-		new Vector3(0f, 0f, 1.6f),
-		new Vector3(0f, 0f, -1.6f),
-		new Vector3(1.2f, 0f, 1.2f),
-		new Vector3(1.2f, 0f, -1.2f),
-		new Vector3(-1.2f, 0f, 1.2f),
-		new Vector3(-1.2f, 0f, -1.2f),
-		new Vector3(2.6f, 0f, 0f),
-		new Vector3(-2.6f, 0f, 0f),
-		new Vector3(0f, 0f, 2.6f),
-		new Vector3(0f, 0f, -2.6f)
-	};
 
 	/// <summary>How often the unmodded-room fallback re-pins the critter on remote clients.
 	/// Same cadence as the reference FrogSkill proxy sync (0.08s); the vanilla master-client
@@ -2016,10 +1988,10 @@ public sealed class CritterController : MonoBehaviour
 				: ShouldUseLastKnownRestorePosition()
 				? _lastKnownCritterPosition
 				: (_critterRoot != null ? _critterRoot.transform.position : transform.position);
-			Vector3 target = FindSafeExitPosition(start, lockToTransformEntry);
+			Vector3 target = ResolveSimpleRestorePosition(start);
 			SetCharacterPositionImmediate(_character, target, transform.rotation);
 			ResetExitFallState(target);
-			LogInfo("Repositioned player to safe exit spot: " + target);
+			LogInfo("Repositioned player to restore spot: " + target);
 		}
 		catch (Exception ex)
 		{
@@ -2032,144 +2004,16 @@ public sealed class CritterController : MonoBehaviour
 		if (_character == null) return;
 		Vector3 source = _critterRoot != null ? _critterRoot.transform.position : _character.Center;
 		if (!IsFiniteVector(source)) return;
-		if (TryFindLocalExitPositionAround(source, ExitStandHeight(), out Vector3 safe, out _))
-		{
-			_lastSafeExitAnchor = safe;
-		}
+		_lastSafeExitAnchor = ResolveSimpleRestorePosition(source);
 	}
 
-	private Vector3 FindSafeExitPosition(Vector3 start, bool lockToStart)
+	private Vector3 ResolveSimpleRestorePosition(Vector3 start)
 	{
-		float standHeight = ExitStandHeight();
-		Vector3 bestFallback = Vector3.zero;
-		bool hasBestFallback = false;
-		Vector3[] anchors = lockToStart
-			? new[] { start }
-			: new[]
-			{
-				start,
-				_lastSafeExitAnchor,
-				_prevCenter,
-				_character != null ? _character.Center : Vector3.zero,
-				transform.position,
-				_character != null && _character.data != null ? _character.data.groundPos : Vector3.zero
-			};
-
-		for (int i = 0; i < anchors.Length; i++)
+		if (!IsFiniteVector(start) || start.sqrMagnitude <= 0.0001f)
 		{
-			Vector3 anchor = anchors[i];
-			if (!IsFiniteVector(anchor) || anchor.sqrMagnitude <= 0.0001f) continue;
-			if (TryFindLocalExitPositionAround(anchor, standHeight, out Vector3 safe, out Vector3 fallback))
-			{
-				return safe;
-			}
-			if (!hasBestFallback && IsFiniteVector(fallback) && fallback.sqrMagnitude > 0.0001f)
-			{
-				bestFallback = fallback;
-				hasBestFallback = true;
-			}
+			start = transform.position;
 		}
-
-		for (int i = 0; i < anchors.Length; i++)
-		{
-			Vector3 anchor = anchors[i];
-			if (!IsFiniteVector(anchor) || anchor.sqrMagnitude <= 0.0001f) continue;
-			if (TryFindBroadExitPositionAround(anchor, standHeight, out Vector3 safe, out Vector3 fallback))
-			{
-				return safe;
-			}
-			if (!hasBestFallback && IsFiniteVector(fallback) && fallback.sqrMagnitude > 0.0001f)
-			{
-				bestFallback = fallback;
-				hasBestFallback = true;
-			}
-		}
-
-		if (hasBestFallback)
-		{
-			return bestFallback + Vector3.up * 0.25f;
-		}
-		if (!lockToStart && IsFiniteVector(_lastSafeExitAnchor) && _lastSafeExitAnchor.sqrMagnitude > 0.0001f)
-		{
-			return _lastSafeExitAnchor + Vector3.up * 0.25f;
-		}
-		return (IsFiniteVector(start) ? start : transform.position) + Vector3.up * (standHeight + 0.5f);
-	}
-
-	private static float ExitStandHeight()
-	{
-		return 1.05f;
-	}
-
-	private bool TryFindLocalExitPositionAround(Vector3 anchor, float standHeight, out Vector3 safe, out Vector3 fallback)
-	{
-		return TryFindExitPositionAround(anchor, standHeight, ExitLocalProbeUp, ExitLocalProbeDown, true, out safe, out fallback);
-	}
-
-	private bool TryFindBroadExitPositionAround(Vector3 anchor, float standHeight, out Vector3 safe, out Vector3 fallback)
-	{
-		return TryFindExitPositionAround(anchor, standHeight, ExitBroadProbeHeight, ExitBroadProbeDepth, true, out safe, out fallback);
-	}
-
-	private bool TryFindExitPositionAround(Vector3 anchor, float standHeight, float probeUp, float probeDown, bool limitSurfaceRise, out Vector3 safe, out Vector3 fallback)
-	{
-		safe = Vector3.zero;
-		fallback = Vector3.zero;
-		bool hasFallback = false;
-		for (int offsetIndex = 0; offsetIndex < ExitSearchOffsets.Length; offsetIndex++)
-		{
-			Vector3 probe = anchor + ExitSearchOffsets[offsetIndex] + Vector3.up * probeUp;
-			RaycastHit[] hits = Physics.RaycastAll(
-				probe, Vector3.down, probeUp + probeDown,
-				Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
-			System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-
-			for (int i = 0; i < hits.Length; i++)
-			{
-				if (!IsUsableExitGround(hits[i])) continue;
-				if (limitSurfaceRise && hits[i].point.y > anchor.y + ExitMaxSurfaceRise) continue;
-				Vector3 candidate = hits[i].point + Vector3.up * standHeight;
-				if (!hasFallback)
-				{
-					fallback = candidate;
-					hasFallback = true;
-				}
-				if (IsExitSpaceClear(candidate))
-				{
-					safe = candidate;
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	private bool IsUsableExitGround(RaycastHit hit)
-	{
-		if (hit.collider == null) return false;
-		if (hit.normal.y < ExitGroundMinNormalY) return false;
-		if (_critterRoot != null && hit.collider.transform.IsChildOf(_critterRoot.transform)) return false;
-		if (hit.collider.transform.IsChildOf(transform)) return false;
-		return true;
-	}
-
-	private bool IsExitSpaceClear(Vector3 rootPosition)
-	{
-		Vector3 bottom = rootPosition + Vector3.up * ExitCapsuleBottom;
-		Vector3 top = rootPosition + Vector3.up * ExitCapsuleTop;
-		Collider[] overlaps = Physics.OverlapCapsule(
-			bottom, top, ExitCapsuleRadius,
-			Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
-
-		for (int i = 0; i < overlaps.Length; i++)
-		{
-			Collider col = overlaps[i];
-			if (col == null) continue;
-			if (_critterRoot != null && col.transform.IsChildOf(_critterRoot.transform)) continue;
-			if (col.transform.IsChildOf(transform)) continue;
-			return false;
-		}
-		return true;
+		return start + Vector3.up * RestoreHeightOffset;
 	}
 
 	private void ResetExitFallState(Vector3 groundPosition)

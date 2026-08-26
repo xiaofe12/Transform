@@ -20,7 +20,7 @@ internal static class StatuePlugin
 {
 	public const string Id = "com.github.Thanks.Transform.Statue";
 	public const string Name = "Petrified Scout Form";
-	public const string Version = "0.9.8";
+	public const string Version = "0.9.10";
 
 	internal static ManualLogSource Log;
 

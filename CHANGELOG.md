@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.10  Reporter:JoeDummy001
+
+### Changes
+
+- Add transformation protection feature in the mod UI menu.
+- No longer recalculate height from ground raycast.
+
+### Fixed
+
+- Fixed Scout > Zombie > Scoutmaster > Any Form = BUG , this later results in issues such as invisibility, missing collision, falling through the ground, and movement lock.
+
 ## 0.9.9  Reporter:JoeDummy001
 
 ### Changes
@@ -12,7 +23,7 @@
 
 - Fixed penetration and thaw‑launch occurring the moment rigidbodies restore.
 - Optimize stuttering caused by scene transitions.
-- Fixed an issue where the player ragdoll’s collision could remain disabled.、
+- Fixed an issue where the player ragdoll’s collision could remain disabled.
 - Fixed an issue where the source player's render state was not restored when the stone statue shattered.
 
 ## 0.9.8

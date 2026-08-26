@@ -24,6 +24,7 @@ public sealed class TumbleweedController : MonoBehaviour
 	private const byte NetworkSyncEventCode = 198;
 	private const string NetworkSyncMagic = "ImTumbleweed.Sync";
 	private const float NetworkSyncInterval = 0.05f;
+	private const float RestoreHeightOffset = 0.6f;
 	/// <summary>Mouse-down input is sampled in Update and consumed in FixedUpdate. Reading
 	/// GetMouseButtonDown directly in FixedUpdate can miss short clicks when render and
 	/// physics frames do not line up.</summary>
@@ -642,10 +643,10 @@ public sealed class TumbleweedController : MonoBehaviour
 		try
 		{
 			Vector3 start = _weedRoot != null ? _weedRoot.transform.position : transform.position;
-			Vector3 target = FindSafeExitPosition(start);
+			Vector3 target = ResolveSimpleRestorePosition(start);
 			MoveCharacterToExit(target);
 			ResetExitFallState(target);
-			LogInfo("Repositioned player to safe exit spot: " + target);
+			LogInfo("Repositioned player to restore spot: " + target);
 		}
 		catch (Exception ex)
 		{
@@ -653,43 +654,20 @@ public sealed class TumbleweedController : MonoBehaviour
 		}
 	}
 
-	/// <summary>
-	/// Finds the nearest solid ground below (a bit above) the given position and returns
-	/// a standing spot 1m above it. Handles weeds that ended up underground, inside a
-	/// wall, or mid-air: the probe starts 20m above the weed and casts straight down,
-	/// skipping the weed's own collider. Falls back to "same spot, raised 1m" when no
-	/// ground is found at all (e.g. in the void).
-	/// </summary>
-	private Vector3 FindSafeExitPosition(Vector3 start)
+	private Vector3 ResolveSimpleRestorePosition(Vector3 start)
 	{
-		const float probeHeight = 20f;
-		const float probeDepth = 60f;
-		const float standHeight = 1f;
-
-		Vector3 probe = start + Vector3.up * probeHeight;
-		RaycastHit[] hits = Physics.RaycastAll(
-			probe,
-			Vector3.down,
-			probeHeight + probeDepth,
-			Physics.DefaultRaycastLayers,
-			QueryTriggerInteraction.Ignore);
-		System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-
-		for (int i = 0; i < hits.Length; i++)
+		if (!IsFiniteVector(start) || start.sqrMagnitude <= 0.0001f)
 		{
-			if (hits[i].collider == null)
-			{
-				continue;
-			}
-			// The weed ball itself (and anything nested under it) is not ground.
-			if (_weedRoot != null && hits[i].collider.transform.IsChildOf(_weedRoot.transform))
-			{
-				continue;
-			}
-			return hits[i].point + Vector3.up * standHeight;
+			start = transform.position;
 		}
+		return start + Vector3.up * RestoreHeightOffset;
+	}
 
-		return start + Vector3.up * standHeight;
+	private static bool IsFiniteVector(Vector3 value)
+	{
+		return !float.IsNaN(value.x) && !float.IsInfinity(value.x)
+		       && !float.IsNaN(value.y) && !float.IsInfinity(value.y)
+		       && !float.IsNaN(value.z) && !float.IsInfinity(value.z);
 	}
 
 	private void MoveCharacterToExit(Vector3 target)

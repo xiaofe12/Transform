@@ -45,6 +45,9 @@ public sealed class StatueController : MonoBehaviour
 	private const float JumpStaminaCost = 0.1f;
 	private const float MinSprintStamina = 0.02f;
 	private const float DestroyRestoreDelaySeconds = 1f;
+	private const float SpawnStabilizeSeconds = 0.75f;
+	private const float DestroyedStateConfirmSeconds = 0.2f;
+	private const float RestoreHeightOffset = 0.6f;
 	private const float MaxStatueLinearSpeed = 8.5f;
 	private const float MaxStatueAngularSpeed = 18f;
 	private const float RendererRestorePulseSeconds = 1.25f;
@@ -61,6 +64,9 @@ public sealed class StatueController : MonoBehaviour
 	private PhotonView _statueView;
 	private float _nextJumpAllowedTime;
 	private float _destroyRestoreAt = -1f;
+	private float _statueStateStableAt;
+	private float _statueMissingSince = -1f;
+	private float _statueShatteredSince = -1f;
 	private Vector3 _transformEntryRestorePosition;
 	private Vector3 _destroyRestoreHoldPosition;
 	private Vector3 _lastKnownStatueAnchor;
@@ -100,17 +106,7 @@ public sealed class StatueController : MonoBehaviour
 	public bool IsValid()
 	{
 		if (!Active || _character == null) return false;
-		if (_statueRoot == null)
-		{
-			ScheduleDestroyedRestore("statue object disappeared");
-			return true;
-		}
-		if (_statueComponent != null && _statueComponent.normalBody != null && !_statueComponent.normalBody.activeSelf)
-		{
-			// The statue shattered (Break swaps normalBody off and turns the pieces on).
-			ScheduleDestroyedRestore("statue shattered");
-			return true;
-		}
+		UpdateDestroyedRestoreFromStatueState();
 		return true;
 	}
 
@@ -151,6 +147,9 @@ public sealed class StatueController : MonoBehaviour
 		_nextJumpAllowedTime = 0f;
 		StopRendererRestorePulse();
 		_destroyRestoreAt = -1f;
+		_statueStateStableAt = Time.unscaledTime + SpawnStabilizeSeconds;
+		_statueMissingSince = -1f;
+		_statueShatteredSince = -1f;
 		_restoreAtTransformEntryOnExit = false;
 		_transformEntryRestorePosition = character != null ? character.Center : transform.position;
 		_destroyRestoreHoldPosition = _transformEntryRestorePosition;
@@ -410,16 +409,44 @@ public sealed class StatueController : MonoBehaviour
 		if (_statueRoot != null && _statueRoot.transform.position.y < VoidExitHeight)
 		{
 			ScheduleDestroyedRestore("statue fell out of the world");
+			return;
 		}
-		if (_statueRoot == null)
+
+		if (ShouldConfirmDestroyedState(_statueRoot == null, ref _statueMissingSince))
 		{
 			ScheduleDestroyedRestore("statue object disappeared");
 			return;
 		}
-		if (_statueComponent != null && _statueComponent.normalBody != null && !_statueComponent.normalBody.activeSelf)
+
+		bool shattered = _statueComponent != null
+		                 && _statueComponent.normalBody != null
+		                 && !_statueComponent.normalBody.activeSelf;
+		if (ShouldConfirmDestroyedState(shattered, ref _statueShatteredSince))
 		{
 			ScheduleDestroyedRestore("statue shattered");
 		}
+	}
+
+	private bool ShouldConfirmDestroyedState(bool detected, ref float detectedSince)
+	{
+		if (!detected)
+		{
+			detectedSince = -1f;
+			return false;
+		}
+
+		float now = Time.unscaledTime;
+		if (now < _statueStateStableAt)
+		{
+			detectedSince = -1f;
+			return false;
+		}
+		if (detectedSince < 0f)
+		{
+			detectedSince = now;
+			return false;
+		}
+		return now - detectedSince >= DestroyedStateConfirmSeconds;
 	}
 
 	/// <summary>
@@ -719,10 +746,10 @@ public sealed class StatueController : MonoBehaviour
 			Vector3 start = lockToTransformEntry
 				? _transformEntryRestorePosition
 				: (_statueRoot != null ? GetStatueAnchor() : transform.position);
-			Vector3 target = FindSafeExitPosition(start, lockToTransformEntry);
+			Vector3 target = ResolveSimpleRestorePosition(start);
 			MoveCharacterToExit(target);
 			ResetExitFallState(target);
-			LogInfo("Repositioned player to safe exit spot: " + target);
+			LogInfo("Repositioned player to restore spot: " + target);
 		}
 		catch (Exception ex)
 		{
@@ -730,35 +757,13 @@ public sealed class StatueController : MonoBehaviour
 		}
 	}
 
-	private Vector3 FindSafeExitPosition(Vector3 start, bool lockToStart)
+	private Vector3 ResolveSimpleRestorePosition(Vector3 start)
 	{
-		const float probeHeight = 20f;
-		const float probeDepth = 60f;
-		const float standHeight = 1f;
-
 		if (!IsFiniteVector(start) || start.sqrMagnitude <= 0.0001f)
 		{
 			start = transform.position;
 		}
-
-		Vector3 probe = start + Vector3.up * probeHeight;
-		RaycastHit[] hits = Physics.RaycastAll(
-			probe,
-			Vector3.down,
-			probeHeight + probeDepth,
-			Physics.DefaultRaycastLayers,
-			QueryTriggerInteraction.Ignore);
-		Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-
-		for (int i = 0; i < hits.Length; i++)
-		{
-			if (hits[i].collider == null) continue;
-			// The statue itself (and anything nested under it) is not ground.
-			if (_statueRoot != null && hits[i].collider.transform.IsChildOf(_statueRoot.transform)) continue;
-			return hits[i].point + Vector3.up * standHeight;
-		}
-
-		return start + Vector3.up * standHeight;
+		return start + Vector3.up * RestoreHeightOffset;
 	}
 
 	private void ScheduleDestroyedRestore(string reason)
