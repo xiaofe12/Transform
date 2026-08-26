@@ -1,8 +1,12 @@
 ## PEAK Transform
+
 - To prevent the original transformation mod from ruining the gameplay experience for other players in PEAK, a host‑authoritative integrated mod **PEAK Transform** has been created.
 - The original standalone mods are discontinued and will no longer be maintained. All new features, bug fixes and version updates will be released exclusively within this unified mod.
 
 ## Mod Compatibility
+
+- com.github.megalon.peakcinema
+- PeakSpectatorMode
 
 - PeakStatsEx
 - peakstamina
@@ -14,18 +18,10 @@
 - By default, hold the F key for 1 second to open the menu. Select a form inside the menu. You can double‑click to transform immediately, or press F once to transform.
 After selecting a form, you can transform directly without opening the menu: press F once to transform, press F again to revert.
 All key‑related behaviors can be modified in the configuration file.
-- The mod currently includes 13 playable forms: Normal Zombie, Player Zombie, Mushroom-Man Zombie, Scoutmaster, Ghost, Tumbleweed, Tornado, Statue, Frog, Beetle, Scorpion, Coconut and Bomb. Each form is designed with its own movement, camera behavior, interaction rules and safety handling so it can feel distinct while still working cleanly inside multiplayer sessions.
+- The mod currently includes 13 playable forms: Normal Zombie, Player Zombie, Mushroom-Man Zombie, Scoutmaster, Ghost, Tumbleweed, Tornado, Statue, Frog, Beetle, Scorpion, Coconut, and Bomb. Each form is designed with its own movement, camera behavior, interaction rules and safety handling so it can feel distinct while still working cleanly inside multiplayer sessions.
 - Multiplayer stability is the main design goal. Room-level transformation rules can be managed through the in-game menu, including whether transformations are allowed everywhere, limited to the lobby, or disabled for the room. Individual forms can also be enabled or disabled to help hosts control the experience for everyone in the lobby.
 - PEAK Transform also includes safeguards for recovery, item-like forms, remote synchronization, camera transitions, stamina behavior and special-case interactions. The goal is to make transformations fun to use without breaking the normal PEAK flow or creating avoidable problems for other players.
 - Open the transform menu in game, choose a form, and switch between different play styles without juggling multiple standalone mods.
-
-## Updates
-
-V 0.9.6
-
-- Coconuts / Bombs return to the transformation position only when destroyed, exploded or ruptured.
-- Added controller support.
-- Optimize performance and reduce stuttering.
 
 ## Menu Features
 

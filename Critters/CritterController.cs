@@ -638,8 +638,15 @@ public sealed class CritterController : MonoBehaviour
 			KeepLocalRenderersHidden();
 			HideHud();
 			HandleStamina();
-			BufferFrogJumpInput();
-			BufferAttackInput();
+			if (!global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
+			{
+				BufferFrogJumpInput();
+				BufferAttackInput();
+			}
+			else
+			{
+				ClearBufferedControlInput();
+			}
 
 			// Safety nets: the networked critter died / was destroyed / fell out of the world.
 			CheckCritterIntegrity();
@@ -752,7 +759,15 @@ public sealed class CritterController : MonoBehaviour
 		try
 		{
 			FollowCritterWithCharacterRoot();
-			DriveCritterPhysics();
+			if (!global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
+			{
+				DriveCritterPhysics();
+			}
+			else
+			{
+				ClearBufferedControlInput();
+				_controlledFlatVelocity = Vector3.zero;
+			}
 		}
 		catch (Exception ex)
 		{
@@ -1006,7 +1021,7 @@ public sealed class CritterController : MonoBehaviour
 	{
 		if (_critterRigidbody == null) return;
 
-		if (global::TransformState.MenuOpen) return;
+		if (global::TransformState.MenuOpen || global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl) return;
 		ApplyControlledRigidbodySettings(false);
 
 		Vector3 forward = GetFlatLookDirection();
@@ -1431,32 +1446,6 @@ public sealed class CritterController : MonoBehaviour
 		{
 			Vector3 fallback = GetFlatLookDirection() + Vector3.up * CoconutSlamUpBias;
 			return fallback.normalized;
-		}
-	}
-
-	private Vector3 FindCrosshairPoint(float range)
-	{
-		try
-		{
-			Camera camera = Camera.main;
-			if (camera == null || _critterRoot == null)
-			{
-				return _critterRoot != null
-					? _critterRoot.transform.position + GetFlatLookDirection() * range
-					: transform.position + transform.forward * range;
-			}
-			Ray ray = new Ray(camera.transform.position, camera.transform.forward);
-			if (Physics.Raycast(ray, out RaycastHit hit, range, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
-			{
-				return hit.point;
-			}
-			return ray.origin + ray.direction * range;
-		}
-		catch
-		{
-			return _critterRoot != null
-				? _critterRoot.transform.position + GetFlatLookDirection() * range
-				: transform.position + transform.forward * range;
 		}
 	}
 
@@ -1931,6 +1920,14 @@ public sealed class CritterController : MonoBehaviour
 		_attackPressedTime = -10f;
 	}
 
+	private void ClearBufferedControlInput()
+	{
+		_frogJumpPressedTime = -10f;
+		_attackPressedTime = -10f;
+		_coconutChargeStartTime = -1f;
+		_coconutSlamQueued = false;
+	}
+
 	private void KeepPlayerAlive()
 	{
 		if (_character == null || _character.data == null) return;
@@ -2394,6 +2391,9 @@ public sealed class CritterController : MonoBehaviour
 
 	private void RefreshCamera()
 	{
+		// 外部自由相机（PeakSpectatorMode / PeakCinema）激活期间让路，避免双方逐帧互相覆盖相机。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive) return;
+
 		try
 		{
 			Camera camera = Camera.main;
@@ -2459,4 +2459,3 @@ public sealed class CritterController : MonoBehaviour
 		return Mathf.Clamp(value, 60f, 110f);
 	}
 }
-

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.9  Reporter:JoeDummy001
+
+### Changes
+
+- Add compatibility between this mod and both PeakSpectatorMode.dll & com.github.megalon.peakcinema.dll.
+- Disable canEmote during transformation and force close / exit the emote wheel.
+- Increase the fall resistance of the petrified statue.
+
+### Fixed
+
+- Fixed penetration and thaw‑launch occurring the moment rigidbodies restore.
+- Optimize stuttering caused by scene transitions.
+- Fixed an issue where the player ragdoll’s collision could remain disabled.、
+- Fixed an issue where the source player's render state was not restored when the stone statue shattered.
+
 ## 0.9.8
 
 ### Changes
@@ -12,7 +27,6 @@
 ### Fixed
 
 - Resolved console spam caused by call errors.
-- Fixed jittering of the Cactus Ball form when on other players.
 - Fix frog form dragging other players to extreme heights
 
 

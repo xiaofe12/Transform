@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\Mod Projects\\Transform\\Transform.csproj": {}
+    "d:\\Mod Projects\\Transform\\Transform.csproj": {}
   },
   "projects": {
-    "D:\\Mod Projects\\Transform\\Transform.csproj": {
+    "d:\\Mod Projects\\Transform\\Transform.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\Mod Projects\\Transform\\Transform.csproj",
+        "projectUniqueName": "d:\\Mod Projects\\Transform\\Transform.csproj",
         "projectName": "Thanks.Transform",
-        "projectPath": "D:\\Mod Projects\\Transform\\Transform.csproj",
+        "projectPath": "d:\\Mod Projects\\Transform\\Transform.csproj",
         "packagesPath": "C:\\Users\\17994\\.nuget\\packages\\",
-        "outputPath": "D:\\Mod Projects\\Transform\\obj\\",
+        "outputPath": "d:\\Mod Projects\\Transform\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\17994\\AppData\\Roaming\\NuGet\\NuGet.Config",

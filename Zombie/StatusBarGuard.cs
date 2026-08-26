@@ -119,8 +119,8 @@ internal static class StatusBarGuard
 
             // CharacterStaminaBar.AnimateEnable / AnimateDisable — the coroutine error:
             // the mod parents its "Bar(Clone)" under the vanilla stamina bar's parent, and
-            // while a Transform form hides the full HUD (TransformHud.TickHide(false)) that
-            // ancestor is deactivated, so StartCoroutine on the inactive-in-hierarchy bar
+            // while a Transform form or third-party free camera hides the status bar, that
+            // ancestor may be deactivated, so StartCoroutine on the inactive-in-hierarchy bar
             // throws "Coroutine couldn't be started because the game object 'Bar(Clone)'
             // is inactive!" every frame. Skip both while the bar is not visible; the
             // manager calls them every frame, so they self-heal once the HUD is restored.

@@ -22,7 +22,6 @@ public sealed class ZombieController : MonoBehaviour
     private const float ThirdPersonAttackHeightOffset = 0.45f;    // look-target lowered during lunge
     private const float DefaultCameraDistance = 2.8f;
     private const float DefaultCameraHeight = 0.85f;
-    private const float DefaultCameraFov = 80f;
 
     // --- Lunge constants ---
     private const float AngularVelocityDamping = 0.92f;
@@ -127,6 +126,10 @@ public sealed class ZombieController : MonoBehaviour
     private const float ExitCameraBlendSeconds = 0.55f;
     private const float NetworkZombiePoolDelaySeconds = 1.25f;
     private const float ZombiePoolDepth = 80f;
+    private const float EntryVerticalStabilizeSeconds = 0.8f;
+    private const float EntryMaxUpwardDrift = 0.75f;
+    private const float RestoreMaxAboveGround = 0.75f;
+    private const float GroundProbeMaxAboveCenter = 0.25f;
 
     // Input edge detection
     private bool _lastJumpPressed;
@@ -161,10 +164,16 @@ public sealed class ZombieController : MonoBehaviour
     // and the shadow-cascade / fog / lighting work that references the player transform.
     private Vector3 _hiddenBodyPos;
     private bool _hiddenBodyPosSet;
+    private Vector3 _entryPlayerCenter;
+    private float _entryCenterGroundOffset = 1f;
+    private bool _entryGroundReferenceValid;
+    private float _entryVerticalStabilizeUntil;
 
     // Player body state
     private readonly List<MonoBehaviour> _disabledCameraScripts = new List<MonoBehaviour>();
-    private readonly List<bool> _cameraScriptStates = new List<bool>();    private CharacterMovement _disabledPlayerMovement;
+    private readonly List<bool> _cameraScriptStates = new List<bool>();
+    // 外部自由相机激活期间挂起相机脚本接管：对方关闭后需要重新 DisableOriginalCameraControl。
+    private bool _cameraControlDeferred;    private CharacterMovement _disabledPlayerMovement;
 
     // Saved ragdoll physics state so we can freeze the parked body and restore it exactly on exit.
     private readonly List<Rigidbody> _frozenBodyparts = new List<Rigidbody>();
@@ -307,6 +316,7 @@ public sealed class ZombieController : MonoBehaviour
         // camera from its later execution order — kill it before the new transform starts.
         StopExitCameraBlend();
         _playerCharacter = playerCharacter;
+        CaptureEntryGroundReference(playerCharacter);
         FreezePlayerPhysics();
         HidePlayerBody();
         SendNetworkBodyVisibility(true);
@@ -344,7 +354,16 @@ public sealed class ZombieController : MonoBehaviour
         // correct while the body is stashed below the terrain.
         try { Character.localCharacter = _zombieCharacter; _localCharacterSwapTarget = _zombieCharacter; _localCharacterSwapped = true; }
         catch (Exception ex) { LogError("EnterZombie localCharacter swap", ex); }
-        DisableOriginalCameraControl();
+        // 外部自由相机激活期间不禁用 vanilla 相机脚本（观战 GodCam 依赖 MainCameraMovement 运行），
+        // 待对方关闭后由 Update 里的交接维护重新接管。
+        if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive)
+        {
+            _cameraControlDeferred = true;
+        }
+        else
+        {
+            DisableOriginalCameraControl();
+        }
         HideHud();
         WarpPlayerToHiddenPosition();
         StartCoroutine(ReassertOutfitAfterEnter());
@@ -488,7 +507,7 @@ public sealed class ZombieController : MonoBehaviour
         bool restore = false;
         if (_zombieCharacter != null && _zombieCharacter.data != null)
         {
-            restorePos = _zombieCharacter.Center + Vector3.up * 0.25f;
+            restorePos = ResolveRestorePositionFromZombie(_zombieCharacter.Center);
             restoreLook = _zombieCharacter.data.lookValues;
             restore = true;
         }
@@ -503,6 +522,10 @@ public sealed class ZombieController : MonoBehaviour
             _playerCharacter.data.lookValues = restoreLook;
             RecalculateLookDirections(_playerCharacter);
             ResetPlayerState(_playerCharacter, restorePos);
+            if (_playerCharacter.data != null && _entryGroundReferenceValid)
+            {
+                _playerCharacter.data.groundPos = restorePos - Vector3.up * _entryCenterGroundOffset;
+            }
             // Snap the root and ragdoll parts immediately; the normal sync path settles remotes.
             SetCharacterPositionImmediate(_playerCharacter, restorePos, _playerCharacter.transform.rotation);
         }
@@ -536,6 +559,7 @@ public sealed class ZombieController : MonoBehaviour
         yield return null;
         RestorePlayerBody();
 
+        yield return new WaitForFixedUpdate();
         yield return null;
         RestorePlayerPhysics();
 
@@ -908,7 +932,7 @@ public sealed class ZombieController : MonoBehaviour
             try
             {
                 GameObject inst = PhotonNetwork.Instantiate(prefabName, pos, rot, 0, new object[] { NetworkVisualMarker, playerCharacter.photonView.ViewID, (int)_zombieAppearance });
-                if (inst != null) { inst.name = "ImZombieNetworked"; _zombieIsNetworked = true; LogInfo("Spawned networked zombie (" + prefabName + ")."); return inst; }
+                if (inst != null) { AlignSpawnedZombieToPlayerCenter(inst, pos, rot); inst.name = "ImZombieNetworked"; _zombieIsNetworked = true; LogInfo("Spawned networked zombie (" + prefabName + ")."); return inst; }
             }
             catch (Exception ex) { LogError("PhotonNetwork.Instantiate " + prefabName, ex); }
         }
@@ -917,10 +941,25 @@ public sealed class ZombieController : MonoBehaviour
             GameObject prefab = LoadZombiePrefabCached(prefabName, playerStyle);
             if (prefab == null) { LogInfo("Could not find zombie prefab via cache/resources (" + prefabName + ")."); return null; }
             GameObject inst = UnityObject.Instantiate(prefab, pos, rot);
+            AlignSpawnedZombieToPlayerCenter(inst, pos, rot);
             inst.name = "ImZombieLocal"; _zombieIsNetworked = false;
             LogInfo("Spawned local zombie prefab (" + prefab.name + ")."); return inst;
         }
         catch (Exception ex) { LogError("Resources.Load zombie prefab", ex); return null; }
+    }
+
+    private static void AlignSpawnedZombieToPlayerCenter(GameObject instance, Vector3 targetCenter, Quaternion rotation)
+    {
+        if (instance == null) return;
+        Character zombieCharacter = instance.GetComponent<Character>();
+        if (zombieCharacter != null)
+        {
+            SetCharacterPositionImmediate(zombieCharacter, targetCenter, rotation);
+        }
+        else
+        {
+            instance.transform.SetPositionAndRotation(targetCenter, rotation);
+        }
     }
 
     private static GameObject LoadZombiePrefabCached(string prefabName, bool playerStyle)
@@ -1734,6 +1773,29 @@ public sealed class ZombieController : MonoBehaviour
         _playerCharacter.input.lookInput = Vector2.zero;
     }
 
+    private void ClearControlledZombieInput()
+    {
+        if (_zombieCharacter == null || _zombieCharacter.input == null) return;
+        _zombieCharacter.input.movementInput = Vector2.zero;
+        _zombieCharacter.input.lookInput = Vector2.zero;
+        _zombieCharacter.input.jumpWasPressed = false;
+        _zombieCharacter.input.jumpIsPressed = false;
+        _zombieCharacter.input.sprintIsPressed = false;
+        _zombieCharacter.input.sprintWasPressed = false;
+        _zombieCharacter.input.sprintToggleWasPressed = false;
+        _zombieCharacter.input.usePrimaryWasPressed = false;
+        _zombieCharacter.input.usePrimaryIsPressed = false;
+        _zombieCharacter.input.usePrimaryWasReleased = false;
+        _zombieCharacter.input.useSecondaryWasPressed = false;
+        _zombieCharacter.input.useSecondaryIsPressed = false;
+        _zombieCharacter.input.useSecondaryWasReleased = false;
+        _zombieCharacter.input.crouchWasPressed = false;
+        _zombieCharacter.input.crouchIsPressed = false;
+        _zombieCharacter.input.crouchToggleWasPressed = false;
+        _lastJumpPressed = false;
+        _lastAttackPressed = false;
+    }
+
     private void DestroyZombie(bool forceDestroy = false)
     {
         DeactivateZombieForDeferredDestroy();
@@ -1822,6 +1884,22 @@ public sealed class ZombieController : MonoBehaviour
         return root != null && (root == _pooledPlayerZombieRoot || root == _pooledMushroomZombieRoot || root == _pooledMushroomManZombieRoot);
     }
 
+    internal static void ClearPooledZombiesForSceneSwitch()
+    {
+        ClearPooledZombieSlot(ref _pooledPlayerZombieRoot);
+        ClearPooledZombieSlot(ref _pooledMushroomZombieRoot);
+        ClearPooledZombieSlot(ref _pooledMushroomManZombieRoot);
+        ZombiePlugin.ClearRendererCache();
+    }
+
+    private static void ClearPooledZombieSlot(ref GameObject slot)
+    {
+        GameObject root = slot;
+        slot = null;
+        if (root == null) return;
+        ForceDestroyZombieRoot(root, IsNetworkedZombieRoot(root));
+    }
+
     private static bool IsNetworkedZombieRoot(GameObject root)
     {
         PhotonView view = root != null ? root.GetComponent<PhotonView>() : null;
@@ -1857,6 +1935,7 @@ public sealed class ZombieController : MonoBehaviour
             ClearPlayerInput();
             KeepZombieAlive();
             PinHiddenBody();
+            MaintainExternalCameraHandoff();
             // Reliable events are not replayed to late joiners — periodically re-send the
             // hide-body event so modded clients that join mid-transform also hide the body's
             // renderers (un-modded clients are covered by the continuous position sync).
@@ -1879,7 +1958,8 @@ public sealed class ZombieController : MonoBehaviour
             {
                 _nextZombieStateRebroadcast = Time.unscaledTime + ZombieStateRebroadcastSeconds;
                 PushZombieStateToRemote();
-            }            if (_zombieAppearance == ZombiePlugin.ZombieAppearanceOption.Player
+            }
+            if (_zombieAppearance == ZombiePlugin.ZombieAppearanceOption.Player
                 && Time.unscaledTime >= _nextPlayerOutfitRefreshTime)
             {
                 _nextPlayerOutfitRefreshTime = Time.unscaledTime + PlayerOutfitRefreshIntervalSeconds;
@@ -1887,10 +1967,16 @@ public sealed class ZombieController : MonoBehaviour
             }
             // Unified menu open: freeze input-driven behaviour so menu clicks never leak into the
             // form (camera and maintenance above keep running for live page-2 tuning).
-            if (!global::TransformState.MenuOpen)
+            if (!global::TransformState.MenuOpen && !global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
             {
                 DriveZombieInput();
                 UpdateAttack();
+            }
+            else
+            {
+                ClearControlledZombieInput();
+                _jumpQueued = false;
+                if (_attacking) UpdateAttack();
             }
             if (!Active) return;
             // Defend our localCharacter swap: other transform mods also swap Character.localCharacter,
@@ -1900,6 +1986,7 @@ public sealed class ZombieController : MonoBehaviour
                 try { Character.localCharacter = _zombieCharacter; } catch { }
             }
             if (IsCharacterClimbing()) StabilizeControlledClimb();
+            MaintainEntryVerticalStability();
             EnsureClimbSurfaceStillValid();
             ReassertMushroomManVisualGuard();
             HideHud();
@@ -1915,6 +2002,7 @@ public sealed class ZombieController : MonoBehaviour
             // Climbing stabilization lives here (physics step) so bodypart velocities stay clamped
             // while the vanilla climb FSM keeps the zombie glued to the wall.
             if (IsCharacterClimbing()) StabilizeControlledClimb();
+            MaintainEntryVerticalStability();
 
             // Local (non-networked) zombie jump — apply impulse directly since TryToJump's RPC would NRE.
             if (_jumpQueued && !ViewIsMine())
@@ -2436,6 +2524,113 @@ public sealed class ZombieController : MonoBehaviour
             _zombieCharacter.data.currentRagdollControll = 1f;
     }
 
+    private void CaptureEntryGroundReference(Character character)
+    {
+        _entryPlayerCenter = character != null ? character.Center : Vector3.zero;
+        _entryCenterGroundOffset = 1f;
+        _entryGroundReferenceValid = false;
+        _entryVerticalStabilizeUntil = Time.unscaledTime + EntryVerticalStabilizeSeconds;
+
+        if (character != null && TryFindGroundBelow(_entryPlayerCenter, character, null, 5f, 30f, out RaycastHit groundHit))
+        {
+            _entryCenterGroundOffset = Mathf.Clamp(_entryPlayerCenter.y - groundHit.point.y, 0.35f, 3.5f);
+            _entryGroundReferenceValid = true;
+        }
+    }
+
+    private void MaintainEntryVerticalStability()
+    {
+        if (!Active || _zombieCharacter == null || Time.unscaledTime > _entryVerticalStabilizeUntil) return;
+
+        Vector3 center = _zombieCharacter.Center;
+        if (!IsFiniteVector(center)) return;
+
+        float maxCenterY = _entryPlayerCenter.y + EntryMaxUpwardDrift;
+        if (TryFindGroundBelow(center, _zombieCharacter, _playerCharacter, 6f, 20f, out RaycastHit groundHit))
+        {
+            float expectedCenterY = groundHit.point.y + (_entryGroundReferenceValid ? _entryCenterGroundOffset : 1f);
+            maxCenterY = Mathf.Min(maxCenterY, expectedCenterY + EntryMaxUpwardDrift);
+        }
+
+        if (center.y <= maxCenterY) return;
+
+        Vector3 clampedCenter = new Vector3(center.x, maxCenterY, center.z);
+        SetCharacterPositionImmediate(_zombieCharacter, clampedCenter, _zombieCharacter.transform.rotation);
+        ClearCharacterBodyVelocities(_zombieCharacter);
+    }
+
+    private Vector3 ResolveRestorePositionFromZombie(Vector3 zombieCenter)
+    {
+        if (!IsFiniteVector(zombieCenter)) return zombieCenter;
+        if (!TryFindGroundBelow(zombieCenter, _zombieCharacter, _playerCharacter, 6f, 40f, out RaycastHit groundHit))
+        {
+            return zombieCenter;
+        }
+
+        float desiredCenterY = groundHit.point.y + (_entryGroundReferenceValid ? _entryCenterGroundOffset : 1f);
+        if (_entryGroundReferenceValid)
+        {
+            float maxRestoreY = _entryPlayerCenter.y + EntryMaxUpwardDrift;
+            if (desiredCenterY > maxRestoreY)
+            {
+                desiredCenterY = maxRestoreY;
+            }
+        }
+
+        if (zombieCenter.y > desiredCenterY + RestoreMaxAboveGround || zombieCenter.y < desiredCenterY - 0.5f)
+        {
+            return new Vector3(zombieCenter.x, desiredCenterY, zombieCenter.z);
+        }
+        return zombieCenter;
+    }
+
+    private static bool TryFindGroundBelow(Vector3 center, Character ignoreA, Character ignoreB, float probeUp, float probeDown, out RaycastHit groundHit)
+    {
+        groundHit = default(RaycastHit);
+        if (!IsFiniteVector(center)) return false;
+
+        RaycastHit[] hits;
+        try
+        {
+            hits = Physics.RaycastAll(center + Vector3.up * probeUp, Vector3.down, probeUp + probeDown, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        }
+        catch
+        {
+            return false;
+        }
+
+        Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+        foreach (RaycastHit hit in hits)
+        {
+            if (hit.collider == null || hit.collider.isTrigger) continue;
+            if (hit.point.y > center.y + GroundProbeMaxAboveCenter) continue;
+            if (Vector3.Dot(hit.normal, Vector3.up) < -0.1f) continue;
+            if (IsColliderOwnedBy(hit.collider.transform, ignoreA) || IsColliderOwnedBy(hit.collider.transform, ignoreB)) continue;
+            groundHit = hit;
+            return true;
+        }
+        return false;
+    }
+
+    private static bool IsColliderOwnedBy(UnityEngine.Transform colliderTransform, Character character)
+    {
+        if (colliderTransform == null || character == null) return false;
+        UnityEngine.Transform characterTransform = character.transform;
+        return colliderTransform == characterTransform || colliderTransform.IsChildOf(characterTransform);
+    }
+
+    private static void ClearCharacterBodyVelocities(Character character)
+    {
+        if (character?.refs?.ragdoll?.partList == null) return;
+        foreach (Bodypart part in character.refs.ragdoll.partList)
+        {
+            Rigidbody rig = part?.Rig;
+            if (rig == null || rig.isKinematic) continue;
+            rig.linearVelocity = Vector3.zero;
+            rig.angularVelocity = Vector3.zero;
+        }
+    }
+
     /// <summary>
     /// Re-asserts the parked body's position and re-freezes its ragdoll every frame. The vanilla
     /// WarpPlayerRPC "MovePlayer" routine only runs once at enter and then re-enables gravity, so
@@ -2575,6 +2770,9 @@ public sealed class ZombieController : MonoBehaviour
 
     private void RefreshCamera()
     {
+        // 外部自由相机（PeakSpectatorMode / PeakCinema）激活期间让路，避免双方逐帧互相覆盖相机。
+        if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive) return;
+
         try
         {
             Camera camera = Camera.main;
@@ -2728,10 +2926,6 @@ public sealed class ZombieController : MonoBehaviour
     {
         return Mathf.Clamp(ZombiePlugin.CameraHeight?.Value ?? DefaultCameraHeight, 0.3f, 1.8f);
     }
-    private static float GetCameraFov()
-    {
-        return Mathf.Clamp(ZombiePlugin.CameraFov?.Value ?? DefaultCameraFov, 60f, 110f);
-    }
     private static float GetHiddenBodyDepth()
     {
         return Mathf.Clamp(ZombiePlugin.HiddenBodyDepth?.Value ?? DefaultHiddenBodyDepth, 5f, 200f);
@@ -2830,6 +3024,29 @@ public sealed class ZombieController : MonoBehaviour
         return ParkedPlayerCharacter;
     }
 
+    /// <summary>
+    /// 外部自由相机（PeakSpectatorMode / PeakCinema）优先的双向交接：激活时把 vanilla 相机脚本
+    /// 还给对方（观战 GodCam 依赖 MainCameraMovement 运行），关闭后重新接管以驱动僵尸相机。
+    /// </summary>
+    private void MaintainExternalCameraHandoff()
+    {
+        try
+        {
+            bool external = global::Transform.Core.ThirdPartyCameras.ExternalCameraActive;
+            if (external && _disabledCameraScripts.Count > 0)
+            {
+                RestoreOriginalCameraControl();
+                _cameraControlDeferred = true;
+            }
+            else if (!external && _cameraControlDeferred && _disabledCameraScripts.Count == 0)
+            {
+                _cameraControlDeferred = false;
+                DisableOriginalCameraControl();
+            }
+        }
+        catch (Exception ex) { LogError("MaintainExternalCameraHandoff", ex); }
+    }
+
     private void DisableOriginalCameraControl()
     {
         Camera cam = Camera.main;
@@ -2877,6 +3094,9 @@ public sealed class ZombieController : MonoBehaviour
     {
         try
         {
+            // 外部自由相机激活期间无需回位混合（相机归对方管），跳过以免移动对方镜头。
+            if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive) return;
+
             Camera cam = Camera.main;
             if (cam == null) return;
             StopExitCameraBlend();
@@ -2898,9 +3118,10 @@ public sealed class ZombieController : MonoBehaviour
 
     private void HideHud()
     {
-        // Keep only the status bar while any transform form is active.
+        // Keep the player's status bar during normal play, but hide it while a spectator/cinema
+        // free camera is active so those overlays are not mixed with zombie state.
         // (global:: prevents binding to UnityEngine.Transform.)
-        global::Transform.Core.TransformHud.TickHide();
+        global::Transform.Core.TransformHud.TickHideKeepStatusUnlessExternalCamera();
     }
 
     private void RestoreHud()
@@ -2973,12 +3194,4 @@ internal sealed class ExitCameraBlend : MonoBehaviour
         if (t >= 1f) Destroy(this);
     }
 }
-
-
-
-
-
-
-
-
 

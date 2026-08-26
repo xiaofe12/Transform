@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Photon.Pun;
 using UnityEngine;
@@ -44,6 +45,9 @@ public sealed class StatueController : MonoBehaviour
 	private const float JumpStaminaCost = 0.1f;
 	private const float MinSprintStamina = 0.02f;
 	private const float DestroyRestoreDelaySeconds = 1f;
+	private const float MaxStatueLinearSpeed = 8.5f;
+	private const float MaxStatueAngularSpeed = 18f;
+	private const float RendererRestorePulseSeconds = 1.25f;
 
 	private Character _character;
 	private Vector3 _cameraVelocity;
@@ -62,6 +66,7 @@ public sealed class StatueController : MonoBehaviour
 	private Vector3 _lastKnownStatueAnchor;
 	private bool _restoreAtTransformEntryOnExit;
 	private Renderer[] _localRenderers;
+	private Coroutine _rendererRestorePulse;
 	private readonly Dictionary<Renderer, bool> _localRendererStates = new Dictionary<Renderer, bool>();
 	private readonly List<KeyValuePair<Rigidbody, RigidbodyInterpolation>> _savedInterpolations =
 		new List<KeyValuePair<Rigidbody, RigidbodyInterpolation>>();
@@ -144,6 +149,7 @@ public sealed class StatueController : MonoBehaviour
 		_cameraVelocity = Vector3.zero;
 		_cameraHasSmoothedPosition = false;
 		_nextJumpAllowedTime = 0f;
+		StopRendererRestorePulse();
 		_destroyRestoreAt = -1f;
 		_restoreAtTransformEntryOnExit = false;
 		_transformEntryRestorePosition = character != null ? character.Center : transform.position;
@@ -190,9 +196,10 @@ public sealed class StatueController : MonoBehaviour
 		PositionCharacterForExit();
 		SetPlayerNoClip(false);
 		DestroyStatue();
-		ForceShowLocalRenderers();
-		_localRenderers = null;
+		RestoreLocalRendererStates(clearState: false);
+		StartRendererRestorePulse();
 		RestoreHud();
+		global::Transform.TransformPlugin.Instance?.BeginPostRestoreRecovery("statue exit");
 
 		if (_character != null && _character.photonView != null)
 		{
@@ -333,7 +340,14 @@ public sealed class StatueController : MonoBehaviour
 		if (!Active || _character == null || _statueBodies == null || IsDestroyedRestorePending()) return;
 		try
 		{
-			DriveStatuePhysics();
+			if (!global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
+			{
+				DriveStatuePhysics();
+			}
+			else
+			{
+				ClampStatueVelocities();
+			}
 		}
 		catch (Exception ex)
 		{
@@ -585,7 +599,11 @@ public sealed class StatueController : MonoBehaviour
 		// jump the statue. WASD movement is already zeroed natively — the menu sets
 		// GUIManager.windowBlockingInput, which makes Character.CanDoInput() false and
 		// CharacterInput.Sample() reset movementInput.
-		if (global::TransformState.MenuOpen) return;
+		if (global::TransformState.MenuOpen || global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
+		{
+			ClampStatueVelocities();
+			return;
+		}
 
 		bool jumpPressed = Transform.Core.GameInput.JumpPressed(StatuePlugin.JumpKey.Value);
 		if (jumpPressed
@@ -604,6 +622,26 @@ public sealed class StatueController : MonoBehaviour
 			}
 			_character.data.currentStamina = Mathf.Max(0f, _character.data.currentStamina - JumpStaminaCost);
 			_nextJumpAllowedTime = Time.time + JumpCooldown;
+		}
+
+		ClampStatueVelocities();
+	}
+
+	private void ClampStatueVelocities()
+	{
+		if (_statueBodies == null) return;
+		for (int i = 0; i < _statueBodies.Length; i++)
+		{
+			Rigidbody rig = _statueBodies[i];
+			if (rig == null || rig.isKinematic) continue;
+			Vector3 velocity = rig.linearVelocity;
+			Vector3 flatVelocity = new Vector3(velocity.x, 0f, velocity.z);
+			if (flatVelocity.magnitude > MaxStatueLinearSpeed)
+			{
+				flatVelocity = flatVelocity.normalized * MaxStatueLinearSpeed;
+				rig.linearVelocity = flatVelocity + Vector3.up * velocity.y;
+			}
+			rig.angularVelocity = Vector3.ClampMagnitude(rig.angularVelocity, MaxStatueAngularSpeed);
 		}
 	}
 
@@ -928,12 +966,12 @@ public sealed class StatueController : MonoBehaviour
 		}
 	}
 
-	private void ForceShowLocalRenderers()
+	private void RestoreLocalRendererStates(bool clearState)
 	{
 		if (_character == null) return;
 		try
 		{
-			Renderer[] renderers = ((Component)_character).GetComponentsInChildren<Renderer>(true);
+			Renderer[] renderers = _localRenderers ?? ((Component)_character).GetComponentsInChildren<Renderer>(true);
 			foreach (Renderer renderer in renderers)
 			{
 				if (renderer == null) continue;
@@ -941,18 +979,47 @@ public sealed class StatueController : MonoBehaviour
 				{
 					renderer.enabled = wasEnabled;
 				}
-				else if (!renderer.enabled)
-				{
-					renderer.enabled = true;
-				}
 			}
-			_localRendererStates.Clear();
-			_localRenderers = null;
+			if (clearState)
+			{
+				_localRendererStates.Clear();
+				_localRenderers = null;
+			}
 		}
 		catch (Exception ex)
 		{
-			LogError("ForceShowLocalRenderers", ex);
+			LogError("RestoreLocalRendererStates", ex);
 		}
+	}
+
+	private void StartRendererRestorePulse()
+	{
+		StopRendererRestorePulse();
+		if (gameObject != null && gameObject.activeInHierarchy)
+		{
+			_rendererRestorePulse = StartCoroutine(RendererRestorePulseRoutine());
+			return;
+		}
+		RestoreLocalRendererStates(clearState: true);
+	}
+
+	private void StopRendererRestorePulse()
+	{
+		if (_rendererRestorePulse == null) return;
+		try { StopCoroutine(_rendererRestorePulse); } catch { }
+		_rendererRestorePulse = null;
+	}
+
+	private IEnumerator RendererRestorePulseRoutine()
+	{
+		float until = Time.unscaledTime + RendererRestorePulseSeconds;
+		while (_character != null && Time.unscaledTime <= until)
+		{
+			RestoreLocalRendererStates(clearState: false);
+			yield return null;
+		}
+		RestoreLocalRendererStates(clearState: true);
+		_rendererRestorePulse = null;
 	}
 
 	// ------------------------------------------------------------------
@@ -973,6 +1040,9 @@ public sealed class StatueController : MonoBehaviour
 
 	private void RefreshCamera()
 	{
+		// 外部自由相机（PeakSpectatorMode / PeakCinema）激活期间让路，避免双方逐帧互相覆盖相机。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive) return;
+
 		try
 		{
 			Camera camera = Camera.main;

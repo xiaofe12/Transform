@@ -414,7 +414,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 		if (_session?.IsActive == true)
 		{
 			_session.Tick();
-			TransformHud.TickHide();
+			TransformHud.TickHideKeepStatusUnlessExternalCamera();
 		}
 
 		HandleToggleHold();
@@ -804,7 +804,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 		RefreshControlledScoutmasterVisuals();
 		if (_session?.IsActive == true)
 		{
-			TransformHud.TickHide();
+			TransformHud.TickHideKeepStatusUnlessExternalCamera();
 		}
 		RefreshRestoredPlayerCamera();
 	}
@@ -1067,6 +1067,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 	// 只接受非角色、非触发器碰撞体作为可站立地面，取最近命中点。
 	// 与 ResolveSourceStashPosition 的过滤规则保持一致，保证"能变身的地方必有可站立地面"。
 	private const float MaxTransformGroundProbeDistance = 40f;
+	private const float GroundProbeMaxAboveCenter = 0.25f;
 
 	// ---- 地面探测短时缓存（菜单每帧查询专用）：查询路径 0.3s/2m 内复用结果，进入/恢复路径保持实时 ----
 	private const float GroundProbeCacheSeconds = 0.3f;
@@ -1101,6 +1102,10 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			foreach (RaycastHit hit in hits)
 			{
 				if (hit.collider == null || hit.collider.GetComponentInParent<Character>() != null)
+				{
+					continue;
+				}
+				if (hit.point.y > center.y + GroundProbeMaxAboveCenter)
 				{
 					continue;
 				}
@@ -3271,10 +3276,17 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 		ResetThirdPersonCameraSmoothing();
 	}
 
-	// 变身期间 HUD 隐藏/恢复统一走共享 TransformHud（只保留状态栏，其余 UI 隐藏）。
+	// 变身期间 HUD 隐藏/恢复统一走共享 TransformHud；常规游玩保留状态栏，
+	// 第三方自由相机激活时隐藏领队状态栏并让出其它 HUD。
 
 	internal static void RefreshControlledScoutmasterCamera(object movement)
 	{
+		// 外部自由相机（PeakSpectatorMode / PeakCinema）激活期间让路，避免双方逐帧互相覆盖相机。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive)
+		{
+			return;
+		}
+
 		Character controlled = GetControlledScoutmasterCharacter();
 		if (movement == null || controlled == null)
 		{
@@ -4259,6 +4271,18 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 
 	private static void RefreshRestoredPlayerCamera(bool snapCamera)
 	{
+		// 外部自由相机激活期间冻结恢复窗口（到期清算顺延），对方关闭后再继续接管。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive)
+		{
+			if (_cameraRestoreCharacter != null)
+			{
+				float now = Time.unscaledTime;
+				_cameraRestoreUntil = Mathf.Max(_cameraRestoreUntil, now + CameraRestoreAssistSeconds);
+				_cameraHealUntil = Mathf.Max(_cameraHealUntil, now + CameraRestoreAssistSeconds + CameraHealSeconds);
+			}
+			return;
+		}
+
 		if (_cameraRestoreCharacter == null)
 		{
 			return;
@@ -4318,6 +4342,13 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 	// 每 0.5 秒校验相机变换/FOV/与角色的距离，仅在确认退化时修复，不干扰正常相机行为与观战。
 	private void PatrolLocalCameraHealth()
 	{
+		// 外部自由相机激活期间不巡检：观战相机会离角色很远且不设置 isSpectating/specCharacter，
+		// 会被误判为退化相机而遭到"修复"，与对方模组抢夺镜头。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive)
+		{
+			return;
+		}
+
 		if (Time.unscaledTime < _nextCameraPatrolTime)
 		{
 			return;
@@ -4833,7 +4864,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			CopyLookStateForRestore(_sourceCharacter, _scoutmasterCharacter, _sourceStartRotation);
 			SetCameraOverride(_scoutmasterCharacter);
 			_viewScoutmasterObject = _scoutmasterObject;
-			TransformHud.TickHide();
+			TransformHud.TickHideKeepStatusUnlessExternalCamera();
 			RestoreRendererVisibility(_scoutmasterObject);
 			// 首次实例化：Unity 物理场景初始化滞后，领队碰撞体可能尚未完成注册。
 			// 保持 kinematic 等待片刻再激活物理，避免首帧穿透地板（"第一次变身掉入地下"）。
@@ -5083,16 +5114,17 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			}
 
 			RestoreRendererVisibility(_scoutmasterObject);
-		ClearCameraOverride();
-		_viewScoutmasterObject = null;
-		TransformHud.Restore();
+			ClearCameraOverride();
+			_viewScoutmasterObject = null;
+			TransformHud.Restore();
 
-		if (restorePlayer && _sourceCharacter != null)
+			if (restorePlayer && _sourceCharacter != null)
 			{
 				CopyLookStateForRestore(_scoutmasterCharacter, _sourceCharacter, restoreRotation);
 				RestoreSourceCharacter(restorePosition, restoreRotation);
 				SanitizeCharacterLookState(_sourceCharacter);
 				ForcePlayerCharacterLookup(_sourceCharacter);
+				RestoreSourceControlState(_sourceCharacter);
 				Character.localCharacter = _sourceCharacter;
 				BeginCameraRestoreAssist(_sourceCharacter);
 			}
@@ -5128,7 +5160,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 				}
 			}
 
-			return ResolveSafeRestorePosition(requestedPosition, _scoutmasterCharacter, _sourceCharacter, _sourceStartPosition);
+			return ResolveSafeRestorePosition(requestedPosition, _scoutmasterCharacter, _sourceCharacter, _sourceStartPosition, _sourceStashPosition);
 		}
 
 		private Quaternion ResolveRestoreRotation()
@@ -5322,27 +5354,43 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			return found;
 		}
 
-		private static Vector3 ResolveSafeRestorePosition(Vector3 requestedPosition, Character scoutmasterCharacter, Character sourceCharacter, Vector3 fallbackPosition)
+		private static Vector3 ResolveSafeRestorePosition(Vector3 requestedPosition, Character scoutmasterCharacter, Character sourceCharacter, Vector3 fallbackPosition, Vector3 sourceStashPosition)
 		{
 			float groundOffset = Mathf.Clamp(RestoreGroundOffset.Value, 0.2f, 5f);
 			Vector3 anchor = IsFiniteVector(requestedPosition) ? requestedPosition : fallbackPosition;
+			if (IsStashRestoreAnchor(anchor, sourceStashPosition, fallbackPosition))
+			{
+				Log?.LogWarning("[I'm Scoutmaster] Restore anchor matched the hidden source stash column; falling back to transform start.");
+				anchor = fallbackPosition;
+			}
 			if (!IsFiniteVector(anchor))
 			{
 				anchor = sourceCharacter != null ? ((Component)sourceCharacter).transform.position : Vector3.zero;
 			}
 
-			// 1) anchor 附近的常规向下探测（覆盖正常站立、轻度下掉场景）。
-			// 2) anchor 更高起点的向下探测（覆盖 anchor 已陷入地下的场景）。
-			// 3) 向上探测：当 anchor 掉到地图深处的虚空时，真实地面通常在 anchor 上方，
-			//    必须向上 raycast 才能找到（向下 raycast 永远命中虚空）。
-			// 4) fallback 附近的保底探测（变身起点几乎一定是安全地面）。
-			if (TryFindRestoreGround(anchor + Vector3.up * 5f, 30f, scoutmasterCharacter, sourceCharacter, out RaycastHit hit)
-				|| TryFindRestoreGround(anchor + Vector3.up * 12f, 80f, scoutmasterCharacter, sourceCharacter, out hit)
-				|| TryFindRestoreGroundUpward(anchor, 80f, scoutmasterCharacter, sourceCharacter, out hit)
-				|| TryFindRestoreGround(fallbackPosition + Vector3.up * 5f, 60f, scoutmasterCharacter, sourceCharacter, out hit)
-				|| TryFindRestoreGround(fallbackPosition + Vector3.up * 60f, 200f, scoutmasterCharacter, sourceCharacter, out hit))
+			// 先检查当前童军领队位置附近的脚下地面；只接受不高于角色中心的地面。
+			// 若当前位置不安全，再回退到变身起点附近，避免被头顶可站立面吸上去。
+			float anchorMaxGroundY = anchor.y + GroundProbeMaxAboveCenter;
+			float fallbackMaxGroundY = IsFiniteVector(fallbackPosition)
+				? fallbackPosition.y + GroundProbeMaxAboveCenter
+				: float.PositiveInfinity;
+			if (TryFindRestoreGround(anchor + Vector3.up * 5f, 30f, scoutmasterCharacter, sourceCharacter, anchorMaxGroundY, out RaycastHit hit)
+				|| TryFindRestoreGround(anchor + Vector3.up * 12f, 80f, scoutmasterCharacter, sourceCharacter, anchorMaxGroundY, out hit)
+				|| TryFindRestoreGround(fallbackPosition + Vector3.up * 5f, 60f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit)
+				|| TryFindRestoreGround(fallbackPosition + Vector3.up * 60f, 200f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit))
 			{
-				return hit.point + Vector3.up * groundOffset;
+				Vector3 candidate = hit.point + Vector3.up * groundOffset;
+				if (!IsStashRestoreAnchor(candidate, sourceStashPosition, fallbackPosition))
+				{
+					return candidate;
+				}
+
+				Log?.LogWarning("[I'm Scoutmaster] Restore ground resolved near the hidden source stash; retrying from transform start.");
+				if (TryFindRestoreGround(fallbackPosition + Vector3.up * 5f, 60f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit)
+					|| TryFindRestoreGround(fallbackPosition + Vector3.up * 60f, 200f, scoutmasterCharacter, sourceCharacter, fallbackMaxGroundY, out hit))
+				{
+					return hit.point + Vector3.up * groundOffset;
+				}
 			}
 
 			// 4 次 raycast 全部失败：anchor 极大概率位于虚空（飞出地图/坠入深渊）。
@@ -5353,9 +5401,33 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			{
 				safeFallback = ((Component)sourceCharacter).transform.position;
 			}
+			if (IsStashRestoreAnchor(safeFallback, sourceStashPosition, fallbackPosition))
+			{
+				safeFallback = IsFiniteVector(fallbackPosition) ? fallbackPosition : safeFallback + Vector3.up * Mathf.Max(SourceStashDistance.Value, 10f);
+			}
 
 			Log?.LogWarning("[I'm Scoutmaster] No restore ground found below or above anchor " + anchor + "; restoring at safe fallback " + safeFallback + " instead.");
 			return safeFallback + Vector3.up * groundOffset;
+		}
+
+		private static bool IsStashRestoreAnchor(Vector3 candidate, Vector3 stashPosition, Vector3 transformStartPosition)
+		{
+			if (!IsFiniteVector(candidate) || !IsFiniteVector(stashPosition) || !IsFiniteVector(transformStartPosition))
+			{
+				return false;
+			}
+
+			Vector2 candidateFlat = new Vector2(candidate.x, candidate.z);
+			Vector2 stashFlat = new Vector2(stashPosition.x, stashPosition.z);
+			Vector2 startFlat = new Vector2(transformStartPosition.x, transformStartPosition.z);
+			float stashColumnDistance = Vector2.Distance(candidateFlat, stashFlat);
+			float startColumnDistance = Vector2.Distance(candidateFlat, startFlat);
+			float buriedDepth = transformStartPosition.y - candidate.y;
+			float stashDepthDelta = Mathf.Abs(candidate.y - stashPosition.y);
+
+			return (stashColumnDistance <= 8f || startColumnDistance <= 8f)
+				&& buriedDepth >= 8f
+				&& stashDepthDelta <= Mathf.Max(SourceStashDistance.Value, 10f) + 20f;
 		}
 
 		// 向上 raycast：用于 anchor 已掉到地图深处（虚空）的场景。
@@ -5399,7 +5471,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 				// 命中地形底面后，再从该点上方做一次向下 raycast 找到地表顶面，
 				// 否则把玩家恢复到 hit.point 会卡在地形内部（地形有厚度）。
 				Vector3 topProbe = hit.point + Vector3.up * 12f;
-				if (TryFindRestoreGround(topProbe, 30f, scoutmasterCharacter, sourceCharacter, out RaycastHit topHit))
+				if (TryFindRestoreGround(topProbe, 30f, scoutmasterCharacter, sourceCharacter, float.PositiveInfinity, out RaycastHit topHit))
 				{
 					groundHit = topHit;
 				}
@@ -5413,7 +5485,7 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			return false;
 		}
 
-		private static bool TryFindRestoreGround(Vector3 origin, float distance, Character scoutmasterCharacter, Character sourceCharacter, out RaycastHit groundHit)
+		private static bool TryFindRestoreGround(Vector3 origin, float distance, Character scoutmasterCharacter, Character sourceCharacter, float maxGroundY, out RaycastHit groundHit)
 		{
 			groundHit = default;
 			if (!IsFiniteVector(origin))
@@ -5435,6 +5507,10 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			foreach (RaycastHit hit in hits)
 			{
 				if (hit.collider == null || hit.collider.isTrigger)
+				{
+					continue;
+				}
+				if (hit.point.y > maxGroundY)
 				{
 					continue;
 				}
@@ -5604,12 +5680,92 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 				SetCharacterPositionImmediate(_sourceCharacter, position, rotation);
 				SanitizeCharacterBodyparts(_sourceCharacter, position, rotation);
 				RestoreSourcePhysics();
+				RestoreSourceControlState(_sourceCharacter);
 				RestoreSourceRenderers(_sourceCharacter.gameObject);
 				UnregisterStashedSourceCharacter(_sourceCharacter);
 			}
 			catch (Exception ex)
 			{
 				Log?.LogWarning("[I'm Scoutmaster] Failed to restore source character: " + ex.Message);
+			}
+		}
+
+		private static void RestoreSourceControlState(Character character)
+		{
+			if (character == null)
+			{
+				return;
+			}
+
+			try
+			{
+				if (!character.gameObject.activeSelf)
+				{
+					character.gameObject.SetActive(true);
+				}
+
+				CharacterMovement movement = character.GetComponent<CharacterMovement>();
+				if (movement != null && !movement.enabled)
+				{
+					movement.enabled = true;
+				}
+
+				CharacterInput inputComponent = character.GetComponent<CharacterInput>();
+				if (inputComponent != null && !inputComponent.enabled)
+				{
+					inputComponent.enabled = true;
+				}
+
+				CharacterSyncer syncer = character.GetComponent<CharacterSyncer>();
+				if (syncer != null && !syncer.enabled)
+				{
+					syncer.enabled = true;
+				}
+
+				PhotonView view = character.photonView;
+				if (view != null && !view.enabled)
+				{
+					view.enabled = true;
+				}
+
+				if (character.input != null)
+				{
+					character.input.movementInput = Vector2.zero;
+					character.input.lookInput = Vector2.zero;
+					character.input.jumpWasPressed = false;
+					character.input.jumpIsPressed = false;
+					character.input.sprintIsPressed = false;
+					character.input.sprintWasPressed = false;
+					character.input.sprintToggleWasPressed = false;
+					character.input.usePrimaryWasPressed = false;
+					character.input.usePrimaryIsPressed = false;
+					character.input.useSecondaryWasPressed = false;
+					character.input.useSecondaryIsPressed = false;
+					character.input.crouchWasPressed = false;
+					character.input.crouchIsPressed = false;
+					character.input.crouchToggleWasPressed = false;
+					character.input.interactWasPressed = false;
+					character.input.interactIsPressed = false;
+					character.input.dropWasPressed = false;
+					character.input.dropIsPressed = false;
+				}
+
+				if (character.data != null)
+				{
+					character.data.isSprinting = false;
+					character.data.isCrouching = false;
+					character.data.isJumping = false;
+					character.data.isClimbing = false;
+					character.data.isRopeClimbing = false;
+					character.data.isVineClimbing = false;
+					character.data.isReaching = false;
+					character.data.worldMovementInput = Vector3.zero;
+					character.data.worldMovementInput_Grounded = Vector3.zero;
+				}
+			}
+			catch (Exception ex)
+			{
+				Log?.LogWarning("[I'm Scoutmaster] Failed to restore source control state: " + ex.Message);
 			}
 		}
 

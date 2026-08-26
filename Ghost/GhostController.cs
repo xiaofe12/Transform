@@ -172,6 +172,7 @@ public sealed class GhostController : MonoBehaviour
 		Active = true;
 		ActiveGhostCharacter = character;
 		enabled = true;
+		ForceRestoreCharacterCollision();
 		SetGhostNoClip(true);
 		BuildGhostVisual();
 		HideHud();
@@ -193,6 +194,7 @@ public sealed class GhostController : MonoBehaviour
 		_attackExploded = false;
 		_attackStartedAt = 0f;
 		SetGhostNoClip(false);
+		ForceRestoreCharacterCollision();
 		DestroyGhostVisual();
 		RestoreHud();
 		LogInfo("Exited ghost form.");
@@ -209,7 +211,10 @@ public sealed class GhostController : MonoBehaviour
 		{
 			ClearNonMovementInput();
 			KeepPlayerAlive();
-			UpdateAttack();
+			if (!global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl || _attacking)
+			{
+				UpdateAttack();
+			}
 			// UpdateAttack may auto-revert (attack finished); skip the rest of the frame
 			// so the restored HUD is not hidden again by the HideHud() below.
 			if (!Active)
@@ -411,6 +416,60 @@ public sealed class GhostController : MonoBehaviour
 		}
 	}
 
+	private void ForceRestoreCharacterCollision()
+	{
+		if (_character == null || _character.refs == null || _character.refs.ragdoll == null)
+		{
+			return;
+		}
+
+		try
+		{
+			CharacterRagdoll ragdoll = _character.refs.ragdoll;
+			ragdoll.ToggleKinematic(false);
+			ragdoll.ToggleCollision(true);
+
+			if (ragdoll.partList == null)
+			{
+				return;
+			}
+
+			foreach (Bodypart part in ragdoll.partList)
+			{
+				if (part == null)
+				{
+					continue;
+				}
+
+				Rigidbody rig = part.Rig;
+				if (rig != null)
+				{
+					rig.isKinematic = false;
+					rig.detectCollisions = true;
+					rig.useGravity = true;
+					rig.WakeUp();
+				}
+
+				Collider[] colliders = part.GetComponentsInChildren<Collider>(true);
+				if (colliders == null)
+				{
+					continue;
+				}
+				foreach (Collider collider in colliders)
+				{
+					if (collider != null && !collider.enabled)
+					{
+						collider.enabled = true;
+					}
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			LogError("GhostController.ForceRestoreCharacterCollision", ex);
+		}
+	}
+
 	/// <summary>
 	/// The game (since the 2.02.a "Glider networking" patch) creates every character ragdoll
 	/// rigidbody with RigidbodyInterpolation.Interpolate (RigCreator.AddRigidbodyToPart), while
@@ -486,7 +545,7 @@ public sealed class GhostController : MonoBehaviour
 		// so menu clicks never leak into the form. WASD movement is already zeroed
 		// natively — the menu sets GUIManager.windowBlockingInput, which makes
 		// Character.CanDoInput() false and CharacterInput.Sample() reset movementInput.
-		if (global::TransformState.MenuOpen)
+		if (global::TransformState.MenuOpen || global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
 		{
 			_moveDirection = Vector3.zero;
 			return;
@@ -604,6 +663,7 @@ public sealed class GhostController : MonoBehaviour
 		if (!_attacking)
 		{
 			if (!global::TransformState.MenuOpen
+			    && !global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl
 			    && Transform.Core.GameInput.UseSecondaryPressed(GhostPlugin.AttackKey.Value))
 			{
 				StartAttack();
@@ -1113,6 +1173,9 @@ public sealed class GhostController : MonoBehaviour
 
 	private void RefreshCamera()
 	{
+		// 外部自由相机（PeakSpectatorMode / PeakCinema）激活期间让路，避免双方逐帧互相覆盖相机。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive) return;
+
 		try
 		{
 			Camera camera = Camera.main;

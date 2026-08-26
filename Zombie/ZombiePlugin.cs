@@ -103,6 +103,7 @@ internal static class ZombiePlugin
         // initializes its player, otherwise Character.localCharacter still points at the destroyed
         // zombie and the player can't move or board the plane in the new scene.
         SceneManager.sceneLoaded += OnSceneLoaded;
+        SceneManager.sceneUnloaded += OnSceneUnloaded;
 
         PhotonNetwork.NetworkingClient.EventReceived += OnPhotonEvent;
 
@@ -212,11 +213,21 @@ internal static class ZombiePlugin
     {
         try
         {
+            ZombieController.ClearPooledZombiesForSceneSwitch();
             if (_controller == null || !_controller.Active) return;
             Log?.LogInfo("[I'm a Zombie] Scene switched to '" + scene.name + "' while transformed; force-exiting so the new scene gets a clean player.");
             ForceExit();
         }
         catch (Exception ex) { Log?.LogWarning("[I'm a Zombie] OnSceneLoaded: " + ex.Message); }
+    }
+
+    private static void OnSceneUnloaded(Scene scene)
+    {
+        try
+        {
+            ZombieController.ClearPooledZombiesForSceneSwitch();
+        }
+        catch (Exception ex) { Log?.LogWarning("[I'm a Zombie] OnSceneUnloaded: " + ex.Message); }
     }
 
     /// <summary>Per-frame module maintenance, driven by the unified Transform plugin.</summary>
@@ -252,6 +263,7 @@ internal static class ZombiePlugin
     internal static void Shutdown()
     {
         SceneManager.sceneLoaded -= OnSceneLoaded;
+        SceneManager.sceneUnloaded -= OnSceneUnloaded;
         PhotonNetwork.NetworkingClient.EventReceived -= OnPhotonEvent;
         try { ForceExit(); } catch (Exception ex) { Log?.LogWarning("[I'm a Zombie] Exit cleanup failed: " + ex.Message); }
         try { _harmony?.UnpatchSelf(); } catch (Exception ex) { Log?.LogWarning("[I'm a Zombie] Harmony unpatch failed: " + ex.Message); }
@@ -315,6 +327,11 @@ internal static class ZombiePlugin
             RendererCache[id] = renderers;
         }
         return renderers;
+    }
+
+    internal static void ClearRendererCache()
+    {
+        RendererCache.Clear();
     }
 
     /// <summary>State gate shared with the unified menu: may the local player enter zombie form now?</summary>

@@ -42,20 +42,34 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 	private const float GroundedFootGroundClearance = 0.03f;
 	private const float GroundProbeUp = 2.5f;
 	private const float GroundProbeDistance = 9f;
+	private const float GroundProbeMaxAboveOrigin = 0.25f;
 	private const float GroundingCrouchMaxStep = 0.35f;
 	private const float GroundingStandingMaxStep = 0.22f;
 	private const float GroundingSharpness = 18f;
 	private const float GroundingCrouchFloatingTolerance = 0.025f;
 	private const float GroundingStandingFloatingTolerance = 0.055f;
+	private const float LowObstacleStepMinHeight = 0.055f;
+	private const float LowObstacleStepMaxHeight = 0.62f;
+	private const float LowObstacleProbeHeight = 0.26f;
+	private const float LowObstacleProbeBackoff = 0.18f;
+	private const float LowObstacleProbeForward = 1.05f;
+	private const float LowObstacleTopProbeForward = 0.34f;
+	private const float LowObstacleTopProbeUp = 0.95f;
+	private const float LowObstacleStepClearance = 0.06f;
+	private const float LowObstacleStepSharpness = 22f;
+	private const float LowObstacleMaxStepPerFrame = 0.18f;
 	private const float ThrowSupplementalForceMultiplier = 0.18f;
 	private const float HeadAngularVelocityLimit = 1.5f;
 	private const float HeadRotationSharpness = 28f;
 	private const float HeadRotationSnapAngle = 55f;
+	private const float HeadVisualMaxUpY = 0.17f;
+	private const float HeadVisualMaxDownY = -0.45f;
 	private bool _climbWasHeld;
 	private bool _reachWasHeld;
 	private int _lastReachFrame = -1;
 	private int _pendingRemoteGrabUnattachFrame = -1;
 	private int _lastGroundingFrame = -1;
+	private int _lastLowObstacleStepFrame = -1;
 
 	private Character _sourceCharacter;
 	private Scoutmaster _scoutmaster;
@@ -158,7 +172,7 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 		}
 
 		Character.localCharacter = _character;
-		if (IsControlPausedByIncapacitation())
+		if (IsControlPausedByIncapacitation() || global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
 		{
 			ClearActiveControlInputs();
 			return;
@@ -166,6 +180,7 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 		HandleReachAndThrow();
 		StabilizeControlledHead();
 		KeepGroundedFeetAligned();
+		ApplyLowObstacleStepAssist();
 	}
 
 	internal void ControlTick()
@@ -177,9 +192,12 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 
 		Character.localCharacter = _character;
 		KeepAliveAndControllable();
-		if (IsControlPausedByIncapacitation())
+		if (IsControlPausedByIncapacitation() || global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
 		{
 			ClearActiveControlInputs();
+			ScoutmasterCurrentTargetField?.SetValue(_scoutmaster, null);
+			RefreshOriginalScoutmasterVisuals();
+			ResetOriginalScoutmasterInputSafely();
 			return;
 		}
 		ScoutmasterCurrentTargetField?.SetValue(_scoutmaster, null);
@@ -190,6 +208,7 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 		EnsureClimbSurfaceStillValid();
 		HandleReachAndThrow();
 		KeepGroundedFeetAligned();
+		ApplyLowObstacleStepAssist();
 	}
 
 	private bool IsReady()
@@ -286,6 +305,9 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 				_character.input.sprintIsPressed = false;
 				_character.input.sprintWasPressed = false;
 				_character.input.jumpWasPressed = false;
+				_character.input.jumpIsPressed = false;
+				_character.input.movementInput = Vector2.zero;
+				_character.input.lookInput = Vector2.zero;
 			}
 
 			if (_character.data != null)
@@ -345,7 +367,49 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 		_character.data.lookDirection_Flat = flatLook;
 		_character.data.lookDirection_Right = right;
 		_character.data.lookDirection_Up = up;
-		AlignHeadToLookDirection(lookDirection, up);
+
+		Vector3 headLookDirection = ClampHeadVisualLookDirection(lookDirection, flatLook);
+		Vector3 headRight = Vector3.Cross(Vector3.up, headLookDirection);
+		if (!IsFiniteVector(headRight) || headRight.sqrMagnitude < 0.0001f)
+		{
+			headRight = right;
+		}
+		headRight.Normalize();
+		Vector3 headUp = Vector3.Cross(headLookDirection, headRight);
+		if (!IsFiniteVector(headUp) || headUp.sqrMagnitude < 0.0001f)
+		{
+			headUp = Vector3.up;
+		}
+		else
+		{
+			headUp.Normalize();
+		}
+
+		AlignHeadToLookDirection(headLookDirection, headUp);
+	}
+
+	private static Vector3 ClampHeadVisualLookDirection(Vector3 lookDirection, Vector3 flatLook)
+	{
+		if (!IsFiniteVector(flatLook) || flatLook.sqrMagnitude < 0.0001f)
+		{
+			flatLook = Vector3.ProjectOnPlane(lookDirection, Vector3.up);
+		}
+		if (!IsFiniteVector(flatLook) || flatLook.sqrMagnitude < 0.0001f)
+		{
+			flatLook = Vector3.forward;
+		}
+		flatLook.Normalize();
+
+		float vertical = IsFiniteVector(lookDirection) ? lookDirection.y : 0f;
+		vertical = Mathf.Clamp(vertical, HeadVisualMaxDownY, HeadVisualMaxUpY);
+		float flatScale = Mathf.Sqrt(Mathf.Max(0f, 1f - vertical * vertical));
+		Vector3 visualDirection = flatLook * flatScale + Vector3.up * vertical;
+		if (!IsFiniteVector(visualDirection) || visualDirection.sqrMagnitude < 0.0001f)
+		{
+			return flatLook;
+		}
+
+		return visualDirection.normalized;
 	}
 
 	private void AlignHeadToLookDirection(Vector3 lookDirection, Vector3 up)
@@ -1105,6 +1169,10 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 			{
 				continue;
 			}
+			if (hit.point.y > origin.y + GroundProbeMaxAboveOrigin)
+			{
+				continue;
+			}
 			if (Vector3.Dot(hit.normal, Vector3.up) < 0.2f)
 			{
 				continue;
@@ -1155,6 +1223,228 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 			if (TryGetBodypartBottomY(part, out float partBottomY) && (!found || partBottomY < footBottomY))
 			{
 				footBottomY = partBottomY;
+				found = true;
+			}
+		}
+
+		return found;
+	}
+
+	private void ApplyLowObstacleStepAssist()
+	{
+		if (_lastLowObstacleStepFrame == Time.frameCount)
+		{
+			return;
+		}
+		_lastLowObstacleStepFrame = Time.frameCount;
+
+		if (_character == null || _character.data == null)
+		{
+			return;
+		}
+		if (IsCharacterClimbing() || IsControlPausedByIncapacitation() || !IsStableGrounded())
+		{
+			return;
+		}
+
+		Vector2 movementInput = ReadCurrentMovementInput();
+		if (movementInput.sqrMagnitude <= MovementInputDeadzone * MovementInputDeadzone)
+		{
+			return;
+		}
+		if (!TryResolveControlledGroundY(out float groundY) || !TryGetControlledFootBottomY(out float footBottomY))
+		{
+			return;
+		}
+
+		Vector3 moveDirection = ResolveWorldMoveDirection(movementInput);
+		if (!IsFiniteVector(moveDirection) || moveDirection.sqrMagnitude < 0.0001f)
+		{
+			return;
+		}
+		moveDirection.Normalize();
+
+		if (!TryFindLowObstacleAhead(moveDirection, groundY, footBottomY, out RaycastHit obstacleHit))
+		{
+			return;
+		}
+		if (!TryFindLowObstacleTop(obstacleHit, moveDirection, groundY, out float stepTopY))
+		{
+			return;
+		}
+
+		float stepHeight = stepTopY - groundY;
+		if (stepHeight < LowObstacleStepMinHeight || stepHeight > LowObstacleStepMaxHeight)
+		{
+			return;
+		}
+
+		float targetFootY = stepTopY + LowObstacleStepClearance;
+		float correction = targetFootY - footBottomY;
+		if (correction <= LowObstacleStepMinHeight)
+		{
+			return;
+		}
+
+		float step = Mathf.Min(correction, LowObstacleMaxStepPerFrame);
+		if (Time.deltaTime > 0f)
+		{
+			step *= Mathf.Clamp01(Time.deltaTime * LowObstacleStepSharpness);
+		}
+		if (step <= 0.001f)
+		{
+			return;
+		}
+
+		OffsetControlledBody(Vector3.up * step);
+		if (_character.data != null)
+		{
+			_character.data.isGrounded = false;
+			_character.data.sinceGrounded = 0.04f;
+			_character.data.groundPos = new Vector3(_character.Center.x, stepTopY, _character.Center.z);
+		}
+	}
+
+	private Vector3 ResolveWorldMoveDirection(Vector2 movementInput)
+	{
+		Vector3 forward = _character?.data != null ? _character.data.lookDirection_Flat : Vector3.zero;
+		if (!IsFiniteVector(forward) || forward.sqrMagnitude < 0.0001f)
+		{
+			forward = _character?.data != null ? Vector3.ProjectOnPlane(_character.data.lookDirection, Vector3.up) : Vector3.zero;
+		}
+		if ((!IsFiniteVector(forward) || forward.sqrMagnitude < 0.0001f) && Camera.main != null)
+		{
+			forward = Vector3.ProjectOnPlane(Camera.main.transform.forward, Vector3.up);
+		}
+		if (!IsFiniteVector(forward) || forward.sqrMagnitude < 0.0001f)
+		{
+			forward = Vector3.ProjectOnPlane(((Component)_character).transform.forward, Vector3.up);
+		}
+		if (!IsFiniteVector(forward) || forward.sqrMagnitude < 0.0001f)
+		{
+			forward = Vector3.forward;
+		}
+		forward.Normalize();
+
+		Vector3 right = _character?.data != null ? Vector3.ProjectOnPlane(_character.data.lookDirection_Right, Vector3.up) : Vector3.zero;
+		if (!IsFiniteVector(right) || right.sqrMagnitude < 0.0001f)
+		{
+			right = Vector3.Cross(Vector3.up, forward);
+		}
+		if (!IsFiniteVector(right) || right.sqrMagnitude < 0.0001f)
+		{
+			right = Vector3.right;
+		}
+		right.Normalize();
+
+		Vector3 direction = forward * movementInput.y + right * movementInput.x;
+		if (!IsFiniteVector(direction) || direction.sqrMagnitude < 0.0001f)
+		{
+			return Vector3.zero;
+		}
+		return direction.normalized;
+	}
+
+	private bool TryFindLowObstacleAhead(Vector3 moveDirection, float groundY, float footBottomY, out RaycastHit obstacleHit)
+	{
+		obstacleHit = default;
+		Vector3 center = _character.Center;
+		float probeY = Mathf.Max(groundY, footBottomY) + LowObstacleProbeHeight;
+		Vector3 origin = new Vector3(center.x, probeY, center.z) - moveDirection * LowObstacleProbeBackoff;
+
+		int hitCount;
+		try
+		{
+			hitCount = Physics.RaycastNonAlloc(origin, moveDirection, ClimbProbeHitsBuffer, LowObstacleProbeForward, ~0, QueryTriggerInteraction.Ignore);
+		}
+		catch
+		{
+			return false;
+		}
+		if (hitCount <= 0)
+		{
+			return false;
+		}
+
+		bool found = false;
+		float nearestDistance = float.MaxValue;
+		for (int i = 0; i < hitCount; i++)
+		{
+			RaycastHit hit = ClimbProbeHitsBuffer[i];
+			if (hit.collider == null || hit.collider.isTrigger)
+			{
+				continue;
+			}
+			Character hitCharacter = ResolveHitCharacter(hit);
+			if (hitCharacter == _character || hitCharacter == _sourceCharacter)
+			{
+				continue;
+			}
+			if (Vector3.Dot(hit.normal, Vector3.up) > 0.45f)
+			{
+				continue;
+			}
+
+			if (hit.distance < nearestDistance)
+			{
+				nearestDistance = hit.distance;
+				obstacleHit = hit;
+				found = true;
+			}
+		}
+
+		return found;
+	}
+
+	private bool TryFindLowObstacleTop(RaycastHit obstacleHit, Vector3 moveDirection, float groundY, out float topY)
+	{
+		topY = 0f;
+		Vector3 topProbe = obstacleHit.point + moveDirection * LowObstacleTopProbeForward + Vector3.up * LowObstacleTopProbeUp;
+		float distance = LowObstacleTopProbeUp + LowObstacleStepMaxHeight + 0.25f;
+
+		int hitCount;
+		try
+		{
+			hitCount = Physics.RaycastNonAlloc(topProbe, Vector3.down, GroundProbeHitsBuffer, distance, ~0, QueryTriggerInteraction.Ignore);
+		}
+		catch
+		{
+			return false;
+		}
+		if (hitCount <= 0)
+		{
+			return false;
+		}
+
+		bool found = false;
+		float nearestDistance = float.MaxValue;
+		for (int i = 0; i < hitCount; i++)
+		{
+			RaycastHit hit = GroundProbeHitsBuffer[i];
+			if (hit.collider == null || hit.collider.isTrigger)
+			{
+				continue;
+			}
+			if (Vector3.Dot(hit.normal, Vector3.up) < 0.55f)
+			{
+				continue;
+			}
+			Character hitCharacter = ResolveHitCharacter(hit);
+			if (hitCharacter == _character || hitCharacter == _sourceCharacter)
+			{
+				continue;
+			}
+
+			float stepHeight = hit.point.y - groundY;
+			if (stepHeight < LowObstacleStepMinHeight || stepHeight > LowObstacleStepMaxHeight)
+			{
+				continue;
+			}
+
+			if (hit.distance < nearestDistance)
+			{
+				nearestDistance = hit.distance;
+				topY = hit.point.y;
 				found = true;
 			}
 		}
@@ -1438,4 +1728,3 @@ public sealed class PlayerScoutmasterController : MonoBehaviour
 			&& (_character.data.grabJoint != null || GetGrabbedPlayer(_character) != null);
 	}
 }
-

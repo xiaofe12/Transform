@@ -1,0 +1,7 @@
+﻿{
+    "name": "PEAK_Transform",
+    "version_number": "0.9.9",
+    "website_url": "https://github.com/xiaofe12/Transform",
+	"description": "The mod currently includes 13 playable forms: Normal Zombie, Player Zombie, Mushroom-Man Zombie, Scoutmaster, Ghost, Tumbleweed, Tornado, Statue, Frog, Beetle, Scorpion, Coconut, and Bomb.",
+	"dependencies": ["BepInEx-BepInExPack_PEAK-5.4.75301"]
+}

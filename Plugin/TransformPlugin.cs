@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -44,6 +45,20 @@ public sealed class TransformPlugin : BaseUnityPlugin
     internal ConfigEntry<float> MenuScale;
 
     private const float DefaultMenuHoldSeconds = 1f;
+    private const float ExternalCameraRecoverySeconds = 1.0f;
+    private const float ExternalCameraRepairMaxDistance = 35f;
+    private const float DefaultPlayerCameraFov = 70f;
+
+    private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+    private static readonly BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+    private static readonly MethodInfo CharacterGetBodypartMethod = typeof(Character).GetMethod("GetBodypart", InstanceFlags);
+    private static readonly PropertyInfo MainCameraSpecCharacterProperty = typeof(MainCameraMovement).GetProperty("specCharacter", StaticFlags);
+    private static readonly FieldInfo MainCameraIsSpectatingField = typeof(MainCameraMovement).GetField("isSpectating", InstanceFlags);
+    private static readonly FieldInfo MainCameraRagdollCamField = typeof(MainCameraMovement).GetField("ragdollCam", InstanceFlags);
+    private static readonly FieldInfo MainCameraCurrentForwardOffsetField = typeof(MainCameraMovement).GetField("currentForwardOffset", InstanceFlags);
+    private static readonly FieldInfo MainCameraTargetPlayerPovPositionField = typeof(MainCameraMovement).GetField("targetPlayerPovPosition", InstanceFlags);
+    private static readonly FieldInfo MainCameraPhysicsRotField = typeof(MainCameraMovement).GetField("physicsRot", InstanceFlags);
+    private static readonly MethodInfo FindObjectsOfTypeByTypeMethod = typeof(UnityEngine.Object).GetMethod("FindObjectsOfType", new[] { typeof(Type) });
 
     private Harmony _harmony;
     private GameObject _moduleHost;
@@ -52,6 +67,10 @@ public sealed class TransformPlugin : BaseUnityPlugin
     private bool _menuKeyHoldFired;
     private bool _enteringForm;
     private Core.FormId? _lastFormId;
+    private Coroutine _postRestoreControlRoutine;
+    private bool _externalCameraWasActive;
+    private float _externalCameraRecoveryUntil;
+    private int _externalCameraForceRepairFrames;
 
     private void Awake()
     {
@@ -68,6 +87,9 @@ public sealed class TransformPlugin : BaseUnityPlugin
 
         Core.Localization.Initialize(Logger);
 
+        // 第三方自由相机模组检测（PeakSpectatorMode / PeakCinema）：激活期间各形态相机让路。
+        Core.ThirdPartyCameras.Initialize(Logger);
+
         // 房主选项（房间内变身效果）：三档策略 + Photon 房间属性同步 + 配置持久化。
         RunGuarded("room policy", () => Core.RoomPolicy.Initialize(Config, Logger));
 
@@ -79,6 +101,8 @@ public sealed class TransformPlugin : BaseUnityPlugin
         _harmony = new Harmony(PluginGuid);
         RunGuarded("core patches", () => _harmony.PatchAll(typeof(Core.TransformHarmonyPatches)));
         RunGuarded("canEmote guard", () => Core.TransformHarmonyPatches.InstallCanEmoteGuard(_harmony));
+        RunGuarded("emote wheel guard", () => Core.TransformHarmonyPatches.InstallEmoteWheelGuard(_harmony));
+        RunGuarded("PeakCinema NRE guard", () => Core.TransformHarmonyPatches.InstallPeakCinemaGuard(_harmony));
 
         // Static modules — each binds its own prefixed config sections and installs its own
         // Harmony patches (including the endgame/scene-safety nets they were proven with).
@@ -120,10 +144,12 @@ public sealed class TransformPlugin : BaseUnityPlugin
     private void Update()
     {
         Core.Localization.Tick();
+        Core.ThirdPartyCameras.Tick();
 
         // Mirror the form state for the game-wide Harmony guards (reticle, item bar, backpack
         // wheel) — see Core.TransformState. One frame of lag at enter/exit is harmless.
         TransformState.AnyFormActive = Core.FormRegistry.AnyActive;
+        TickExternalCameraRecovery();
 
         // 房主选项维护：刷新生效策略（房间属性同步）并在策略收紧时强制还原当前形态。
         Core.RoomPolicy.Tick();
@@ -368,7 +394,317 @@ public sealed class TransformPlugin : BaseUnityPlugin
         else
         {
             Log.LogInfo("[Transform] Restored original form.");
+            BeginPostRestoreRecovery("restore request");
         }
+    }
+
+    internal void BeginPostRestoreRecovery(string reason)
+    {
+        try
+        {
+            if (_postRestoreControlRoutine != null)
+            {
+                StopCoroutine(_postRestoreControlRoutine);
+            }
+            RestoreLocalPlayerControlState(reason + " immediate");
+            BeginExternalCameraRecovery();
+            RepairLocalPlayerCamera(forceSnap: true);
+            _postRestoreControlRoutine = StartCoroutine(PostRestoreControlRoutine());
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning("[Transform] Post-restore recovery failed (" + reason + "): " + ex.Message);
+        }
+    }
+
+    private IEnumerator PostRestoreControlRoutine()
+    {
+        RestoreLocalPlayerControlState("restore immediate");
+        yield return null;
+        RestoreLocalPlayerControlState("restore next frame");
+        yield return null;
+        RestoreLocalPlayerControlState("restore second frame");
+        _postRestoreControlRoutine = null;
+    }
+
+    private void RestoreLocalPlayerControlState(string phase)
+    {
+        try
+        {
+            Character character = Character.localCharacter;
+            if (character == null || Core.FormRegistry.AnyActive) return;
+
+            if (!character.gameObject.activeSelf)
+            {
+                character.gameObject.SetActive(true);
+            }
+
+            CharacterMovement movement = character.GetComponent<CharacterMovement>();
+            if (movement != null && !movement.enabled)
+            {
+                movement.enabled = true;
+            }
+
+            CharacterInput inputComponent = character.GetComponent<CharacterInput>();
+            if (inputComponent != null && !inputComponent.enabled)
+            {
+                inputComponent.enabled = true;
+            }
+
+            CharacterSyncer syncer = character.GetComponent<CharacterSyncer>();
+            if (syncer != null && !syncer.enabled)
+            {
+                syncer.enabled = true;
+            }
+
+            Photon.Pun.PhotonView view = character.photonView;
+            if (view != null && !view.enabled)
+            {
+                view.enabled = true;
+            }
+
+            if (character.input != null)
+            {
+                character.input.movementInput = Vector2.zero;
+                character.input.lookInput = Vector2.zero;
+                character.input.jumpWasPressed = false;
+                character.input.jumpIsPressed = false;
+                character.input.sprintIsPressed = false;
+                character.input.sprintWasPressed = false;
+                character.input.sprintToggleWasPressed = false;
+                character.input.usePrimaryWasPressed = false;
+                character.input.usePrimaryIsPressed = false;
+                character.input.useSecondaryWasPressed = false;
+                character.input.useSecondaryIsPressed = false;
+                character.input.crouchWasPressed = false;
+                character.input.crouchIsPressed = false;
+                character.input.crouchToggleWasPressed = false;
+                character.input.interactWasPressed = false;
+                character.input.interactIsPressed = false;
+                character.input.dropWasPressed = false;
+                character.input.dropIsPressed = false;
+            }
+
+            if (character.data != null)
+            {
+                character.data.dead = false;
+                character.data.zombified = false;
+                character.data.passedOut = false;
+                character.data.fullyPassedOut = false;
+                character.data.fallSeconds = 0f;
+                character.data.deathTimer = 0f;
+                character.data.currentRagdollControll = 1f;
+                character.data.isSprinting = false;
+                character.data.isCrouching = false;
+                character.data.isJumping = false;
+                character.data.isClimbing = false;
+                character.data.isRopeClimbing = false;
+                character.data.isVineClimbing = false;
+                character.data.isReaching = false;
+                character.data.avarageVelocity = Vector3.zero;
+                character.data.avarageLastFrameVelocity = Vector3.zero;
+                character.data.worldMovementInput = Vector3.zero;
+                character.data.worldMovementInput_Grounded = Vector3.zero;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning("[Transform] Post-restore control repair failed (" + phase + "): " + ex.Message);
+        }
+    }
+
+    private void TickExternalCameraRecovery()
+    {
+        bool externalActive = Core.ThirdPartyCameras.ExternalCameraActive;
+        if (_externalCameraWasActive && !externalActive)
+        {
+            BeginExternalCameraRecovery();
+        }
+        _externalCameraWasActive = externalActive;
+
+        if (externalActive || Time.unscaledTime > _externalCameraRecoveryUntil)
+        {
+            return;
+        }
+
+        bool forceSnap = _externalCameraForceRepairFrames > 0;
+        if (_externalCameraForceRepairFrames > 0)
+        {
+            _externalCameraForceRepairFrames--;
+        }
+        RepairLocalPlayerCamera(forceSnap);
+    }
+
+    private void BeginExternalCameraRecovery()
+    {
+        _externalCameraRecoveryUntil = Time.unscaledTime + ExternalCameraRecoverySeconds;
+        _externalCameraForceRepairFrames = 2;
+    }
+
+    private void RepairLocalPlayerCamera(bool forceSnap)
+    {
+        try
+        {
+            if (Core.FormRegistry.AnyActive) return;
+            Character character = Character.localCharacter;
+            Camera camera = Camera.main;
+            if (character == null || character.data == null || camera == null) return;
+
+            Vector3 cameraPosition = ResolvePlayerCameraPosition(character);
+            Quaternion cameraRotation = ResolvePlayerCameraRotation(character);
+            if (!IsFiniteVector(cameraPosition) || !IsFiniteQuaternion(cameraRotation)) return;
+
+            ResetMainCameraMovementState(cameraPosition, cameraRotation);
+
+            bool invalidCamera = !IsFiniteVector(camera.transform.position)
+                || !IsFiniteQuaternion(camera.transform.rotation)
+                || float.IsNaN(camera.fieldOfView)
+                || float.IsInfinity(camera.fieldOfView)
+                || camera.fieldOfView < 1f
+                || camera.fieldOfView > 179f;
+            bool tooFar = Vector3.Distance(camera.transform.position, cameraPosition) > ExternalCameraRepairMaxDistance;
+
+            if (forceSnap || invalidCamera || tooFar)
+            {
+                camera.transform.SetPositionAndRotation(cameraPosition, cameraRotation);
+                if (float.IsNaN(camera.fieldOfView) || float.IsInfinity(camera.fieldOfView) || camera.fieldOfView < 1f || camera.fieldOfView > 179f)
+                {
+                    camera.fieldOfView = DefaultPlayerCameraFov;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning("[Transform] External camera recovery failed: " + ex.Message);
+        }
+    }
+
+    private static Vector3 ResolvePlayerCameraPosition(Character character)
+    {
+        UnityEngine.Transform head = ResolveHeadTransform(character);
+        if (head != null)
+        {
+            Vector3 headPosition = head.TransformPoint(Vector3.up);
+            if (IsFiniteVector(headPosition)) return headPosition;
+        }
+
+        try
+        {
+            Vector3 characterHead = character.Head;
+            if (IsFiniteVector(characterHead)) return characterHead;
+        }
+        catch { }
+
+        Vector3 position = character != null ? character.transform.position : Vector3.zero;
+        return IsFiniteVector(position) ? position + Vector3.up : Vector3.zero;
+    }
+
+    private static UnityEngine.Transform ResolveHeadTransform(Character character)
+    {
+        if (character == null) return null;
+
+        try
+        {
+            if (character.refs?.head != null)
+            {
+                return character.refs.head.transform;
+            }
+
+            Bodypart head = GetBodypart(character, BodypartType.Head);
+            return head != null ? head.transform : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Bodypart GetBodypart(Character character, BodypartType bodypartType)
+    {
+        if (character == null || CharacterGetBodypartMethod == null) return null;
+
+        try
+        {
+            return CharacterGetBodypartMethod.Invoke(character, new object[] { bodypartType }) as Bodypart;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void ResetMainCameraMovementState(Vector3 cameraPosition, Quaternion cameraRotation)
+    {
+        try
+        {
+            MainCameraSpecCharacterProperty?.SetValue(null, null, null);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            UnityEngine.Object[] cameraMovements = FindObjectsOfTypeByTypeMethod?.Invoke(null, new object[] { typeof(MainCameraMovement) }) as UnityEngine.Object[];
+            if (cameraMovements == null) return;
+
+            foreach (UnityEngine.Object movement in cameraMovements)
+            {
+                if (movement == null) continue;
+
+                MainCameraIsSpectatingField?.SetValue(movement, false);
+                MainCameraRagdollCamField?.SetValue(movement, 0f);
+                MainCameraCurrentForwardOffsetField?.SetValue(movement, 0f);
+                MainCameraTargetPlayerPovPositionField?.SetValue(movement, cameraPosition);
+                MainCameraPhysicsRotField?.SetValue(movement, cameraRotation);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static Quaternion ResolvePlayerCameraRotation(Character character)
+    {
+        Vector3 direction = character != null && character.data != null ? character.data.lookDirection : Vector3.zero;
+        if (!IsUsableDirection(direction) && character != null && character.data != null)
+        {
+            direction = character.data.lookDirection_Flat;
+        }
+        if (!IsUsableDirection(direction) && character != null)
+        {
+            direction = character.transform.forward;
+        }
+        if (!IsUsableDirection(direction) && Camera.main != null)
+        {
+            direction = Camera.main.transform.forward;
+        }
+        if (!IsUsableDirection(direction))
+        {
+            direction = Vector3.forward;
+        }
+
+        return Quaternion.LookRotation(direction.normalized, Vector3.up);
+    }
+
+    private static bool IsUsableDirection(Vector3 value)
+    {
+        return IsFiniteVector(value) && value.sqrMagnitude >= 0.0001f;
+    }
+
+    private static bool IsFiniteVector(Vector3 value)
+    {
+        return IsFiniteFloat(value.x) && IsFiniteFloat(value.y) && IsFiniteFloat(value.z);
+    }
+
+    private static bool IsFiniteQuaternion(Quaternion value)
+    {
+        return IsFiniteFloat(value.x) && IsFiniteFloat(value.y) && IsFiniteFloat(value.z) && IsFiniteFloat(value.w);
+    }
+
+    private static bool IsFiniteFloat(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
     private void OnDestroy()

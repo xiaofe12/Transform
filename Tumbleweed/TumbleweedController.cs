@@ -289,7 +289,14 @@ public sealed class TumbleweedController : MonoBehaviour
 			UpdateWeedVisual();
 			KeepLocalRenderersHidden();
 			HideHud();
-			BufferDashInput();
+			if (!global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
+			{
+				BufferDashInput();
+			}
+			else
+			{
+				ConsumeDashInput();
+			}
 
 			// Safety net: if the weed somehow rolls out of the world, exit so the vanilla
 			// warp/recovery logic can take over again (we block Warps while transformed).
@@ -405,7 +412,7 @@ public sealed class TumbleweedController : MonoBehaviour
 		// clicks never leak into the form. WASD movement is already zeroed
 		// natively — the menu sets GUIManager.windowBlockingInput, which makes
 		// Character.CanDoInput() false and CharacterInput.Sample() reset movementInput.
-		if (global::TransformState.MenuOpen)
+		if (global::TransformState.MenuOpen || global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
 		{
 			return;
 		}
@@ -538,7 +545,7 @@ public sealed class TumbleweedController : MonoBehaviour
 
 	private void BufferDashInput()
 	{
-		if (global::TransformState.MenuOpen) return;
+		if (global::TransformState.MenuOpen || global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl) return;
 		if (Transform.Core.GameInput.UseSecondaryPressed(KeyCode.Mouse1))
 		{
 			_dashPressedTime = Time.time;
@@ -1339,6 +1346,9 @@ public sealed class TumbleweedController : MonoBehaviour
 
 	private void RefreshCamera()
 	{
+		// 外部自由相机（PeakSpectatorMode / PeakCinema）激活期间让路，避免双方逐帧互相覆盖相机。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive) return;
+
 		try
 		{
 			Camera camera = Camera.main;

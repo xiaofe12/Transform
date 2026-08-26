@@ -163,7 +163,10 @@ public sealed class TornadoController : MonoBehaviour
 
 		try
 		{
-			ApplyMovementVelocity();
+			if (!global::Transform.Core.ThirdPartyCameras.ShouldPauseFormControl)
+			{
+				ApplyMovementVelocity();
+			}
 			ApplyHoverVelocity();
 			ApplySpinningMotion();
 			StabilizeRagdoll();
@@ -999,6 +1002,9 @@ public sealed class TornadoController : MonoBehaviour
 
 	private void RefreshCamera()
 	{
+		// 外部自由相机（PeakSpectatorMode / PeakCinema）激活期间让路，避免双方逐帧互相覆盖相机。
+		if (global::Transform.Core.ThirdPartyCameras.ExternalCameraActive) return;
+
 		try
 		{
 			Camera camera = Camera.main;

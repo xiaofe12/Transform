@@ -78,13 +78,21 @@ internal static class TransformHarmonyPatches
     }
 
     [HarmonyPatch(typeof(CharacterItems), "Update")]
+    [HarmonyPriority(Priority.High)]
+    [HarmonyPrefix]
+    private static bool CharacterItemsUpdateReadyPrefix(CharacterItems __instance, Character ___character)
+    {
+        return IsCharacterItemsUpdateReady(___character, __instance);
+    }
+
+    [HarmonyPatch(typeof(CharacterItems), "Update")]
     [HarmonyFinalizer]
-    private static Exception CharacterItemsUpdateFinalizer(Exception __exception, Character ___character)
+    private static Exception CharacterItemsUpdateFinalizer(Exception __exception, Character ___character, CharacterItems __instance)
     {
         if (__exception == null) return null;
         if (!(__exception is NullReferenceException)) return __exception;
         if (TransformState.AnyFormActive) return null;
-        if (___character == null || ___character.data == null || ___character.refs == null) return null;
+        if (!IsCharacterItemsUpdateReady(___character, __instance)) return null;
         return __exception;
     }
 
@@ -120,6 +128,7 @@ internal static class TransformHarmonyPatches
     {
         try
         {
+            if (TransformState.AnyFormActive) return false;
             Character local = Character.localCharacter;
             if (local == null) return true; // vanilla handles null fine (its first branch)
             if (local.data == null) return false;
@@ -132,6 +141,52 @@ internal static class TransformHarmonyPatches
         }
     }
 
+    private static bool IsCharacterItemsUpdateReady(Character character, CharacterItems items)
+    {
+        if (character == null && items != null)
+        {
+            character = items.GetComponent<Character>();
+        }
+        if (character == null || character.data == null || character.refs == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            Player player = character.player;
+            return player != null && player.itemSlots != null && player.backpackSlot != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool GUIManagerUpdateEmoteWheelPrefix(GUIManager __instance)
+    {
+        if (!TransformState.AnyFormActive) return true;
+
+        try
+        {
+            if (__instance != null && __instance.emoteWheel != null)
+            {
+                __instance.emoteWheel.SetActive(false);
+            }
+
+            Character local = Character.localCharacter;
+            if (local != null && local.data != null)
+            {
+                local.data.usingEmoteWheel = false;
+            }
+        }
+        catch
+        {
+            // UI refs can be rebuilt during scene/menu transitions; skip only this frame.
+        }
+
+        return false;
+    }
     private static bool IsLocalTransformedCharacter(Character character)
     {
         // Every form parks the player-controlled character in Character.localCharacter (physics
@@ -143,6 +198,69 @@ internal static class TransformHarmonyPatches
             && character == Character.localCharacter;
     }
 
+
+    private static Exception CinemaCameraUpdateFinalizer(Exception __exception)
+    {
+        if (__exception == null) return null;
+        if (!(__exception is NullReferenceException)) return __exception;
+
+        string stack = __exception.StackTrace ?? string.Empty;
+        if (stack.IndexOf("PeakCinema.Plugin.ApplyPlayerVisibility", StringComparison.Ordinal) >= 0
+            || stack.IndexOf("PeakCinema.Plugin.CinemaCameraFix", StringComparison.Ordinal) >= 0)
+        {
+            return null;
+        }
+
+        return __exception;
+    }
+
+    private static bool PeakCinemaApplyPlayerVisibilityPrefix()
+    {
+        if (TransformState.AnyFormActive) return false;
+
+        try
+        {
+            if (Character.AllCharacters == null) return false;
+
+            foreach (Character character in Character.AllCharacters)
+            {
+                if (character == null || !character.IsLocal) continue;
+                return character.refs != null && character.refs.customization != null;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    internal static void InstallPeakCinemaGuard(Harmony harmony)
+    {
+        if (harmony == null) return;
+
+        Type cameraType = AccessTools.TypeByName("CinemaCamera");
+        if (cameraType != null)
+        {
+            System.Reflection.MethodInfo update = AccessTools.Method(cameraType, "Update");
+            System.Reflection.MethodInfo finalizer = AccessTools.Method(typeof(TransformHarmonyPatches), nameof(CinemaCameraUpdateFinalizer));
+            if (update != null && finalizer != null)
+            {
+                harmony.Patch(update, finalizer: new HarmonyMethod(finalizer));
+            }
+        }
+
+        Type pluginType = AccessTools.TypeByName("PeakCinema.Plugin");
+        if (pluginType == null) return;
+
+        System.Reflection.MethodInfo applyVisibility = AccessTools.Method(pluginType, "ApplyPlayerVisibility");
+        System.Reflection.MethodInfo prefix = AccessTools.Method(typeof(TransformHarmonyPatches), nameof(PeakCinemaApplyPlayerVisibilityPrefix));
+        if (applyVisibility == null || prefix == null) return;
+
+        harmony.Patch(applyVisibility, prefix: new HarmonyMethod(prefix));
+    }
+
     /// <summary>Manually installs the canEmote guard (the getter is not public, so PatchAll
     /// cannot target it). Called from TransformPlugin.Awake inside a RunGuarded step.</summary>
     internal static void InstallCanEmoteGuard(Harmony harmony)
@@ -151,5 +269,17 @@ internal static class TransformHarmonyPatches
         if (getter == null) return; // member renamed by a game update — degrade quietly
         harmony.Patch(getter, prefix: new HarmonyMethod(AccessTools.Method(
             typeof(TransformHarmonyPatches), nameof(GUIManagerCanEmotePrefix))));
+    }
+
+    /// <summary>Manually installs the emote-wheel guard because UpdateEmoteWheel is private.</summary>
+    internal static void InstallEmoteWheelGuard(Harmony harmony)
+    {
+        if (harmony == null) return;
+
+        System.Reflection.MethodInfo updateEmoteWheel = AccessTools.Method(typeof(GUIManager), "UpdateEmoteWheel");
+        System.Reflection.MethodInfo prefix = AccessTools.Method(typeof(TransformHarmonyPatches), nameof(GUIManagerUpdateEmoteWheelPrefix));
+        if (updateEmoteWheel == null || prefix == null) return;
+
+        harmony.Patch(updateEmoteWheel, prefix: new HarmonyMethod(prefix));
     }
 }
