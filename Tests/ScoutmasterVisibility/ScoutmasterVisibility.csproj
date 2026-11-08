@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/scoutmaster-visibility-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Forms/Scoutmaster/ScoutmasterRendererState.cs" Link="ScoutmasterRendererState.cs" />
+    <Compile Include="VisibilityDoubles.cs" /><Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

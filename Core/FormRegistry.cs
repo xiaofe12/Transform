@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BepInEx.Configuration;
 using Transform.Statue;
@@ -21,7 +21,7 @@ internal enum FormId
     Scorpion,
     Coconut,
     Bomb,
-    Cactus
+    Raven
 }
 
 /// <summary>
@@ -52,25 +52,6 @@ internal static class FormRegistry
         internal string Label => Localization.Tr(LabelZh, LabelEn);
     }
 
-    /// <summary>A boolean parameter rendered as a toggle on menu page 2.</summary>
-    internal sealed class BoolParamDescriptor
-    {
-        internal readonly string LabelZh;
-        internal readonly string LabelEn;
-        internal readonly Func<ConfigEntry<bool>> Entry;
-        internal readonly bool Visible;   // false 时 UI 不渲染（仍可读写 ConfigEntry）
-
-        internal BoolParamDescriptor(string labelZh, string labelEn, Func<ConfigEntry<bool>> entry, bool visible = true)
-        {
-            LabelZh = labelZh;
-            LabelEn = labelEn;
-            Entry = entry;
-            Visible = visible;
-        }
-
-        internal string Label => Localization.Tr(LabelZh, LabelEn);
-    }
-
     internal sealed class FormDescriptor
     {
         internal readonly FormId Id;
@@ -96,7 +77,6 @@ internal static class FormRegistry
 
         /// <summary>Behaviour parameters shown on page 2 below the camera block.</summary>
         internal readonly List<ParamDescriptor> Params = new List<ParamDescriptor>();
-        internal readonly List<BoolParamDescriptor> BoolParams = new List<BoolParamDescriptor>();
 
         /// <summary>Optional localized reason shown on the card when the form cannot be entered
         /// for a KNOWN reason (e.g. "host lacks the mod"). Null = generic "Unavailable".</summary>
@@ -135,74 +115,73 @@ internal static class FormRegistry
         }
     }
 
+    /// <summary>The three zombie cards share one module and identical camera/behaviour parameters;
+    /// only the appearance and the card texts differ.</summary>
+    private static FormDescriptor ZombieForm(
+        FormId id,
+        string nameZh, string nameEn, string descZh, string descEn,
+        ImZombie.ZombiePlugin.ZombieAppearanceOption appearance)
+    {
+        FormDescriptor form = new FormDescriptor(
+            id,
+            nameZh, nameEn, descZh, descEn,
+            () => ImZombie.ZombiePlugin.ActiveAppearance == appearance,
+            () => ImZombie.ZombiePlugin.CanEnter(Character.localCharacter),
+            () => ImZombie.ZombiePlugin.Enter(Character.localCharacter, appearance),
+            ImZombie.ZombiePlugin.Exit,
+            () => ImZombie.ZombiePlugin.CameraDistance,
+            () => ImZombie.ZombiePlugin.CameraHeight,
+            () => ImZombie.ZombiePlugin.CameraFov,
+            1.5f, 6f, 0.3f, 1.8f, 60f, 110f);
+        form.Params.Add(new ParamDescriptor("移动速度", "Movement speed", () => ImZombie.ZombiePlugin.MovementSpeed, 0f, 40f));
+        form.Params.Add(new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImZombie.ZombiePlugin.SprintMultiplier, 1f, 5f));
+        form.Params.Add(new ParamDescriptor("跳跃力", "Jump force", () => ImZombie.ZombiePlugin.JumpForce, 0f, 25f));
+        form.Params.Add(new ParamDescriptor("扑咬冷却", "Bite cooldown", () => ImZombie.ZombiePlugin.AttackCooldown, 0.1f, 5f));
+        return form;
+    }
+
+    /// <summary>The critter cards share one module, one camera range and the same control set;
+    /// only the kind and the adjustable behaviour parameters differ.</summary>
+    private static FormDescriptor CritterForm(
+        FormId id, ImCritter.CritterKind kind,
+        string nameZh, string nameEn, string descZh, string descEn,
+        params ParamDescriptor[] parameters)
+    {
+        FormDescriptor form = new FormDescriptor(
+            id,
+            nameZh, nameEn, descZh, descEn,
+            () => ImCritter.CritterPlugin.IsActive && ImCritter.CritterPlugin.ActiveKind == kind,
+            () => ImCritter.CritterPlugin.CanEnter(Character.localCharacter),
+            () => ImCritter.CritterPlugin.Enter(Character.localCharacter, kind),
+            ImCritter.CritterPlugin.Exit,
+            () => ImCritter.CritterPlugin.CameraDistance(kind),
+            () => ImCritter.CritterPlugin.CameraHeight(kind),
+            () => ImCritter.CritterPlugin.CameraFov(kind),
+            2f, 20f, 0.3f, 10f, 60f, 110f);
+        form.Params.AddRange(parameters);
+        return form;
+    }
+
     private static readonly List<FormDescriptor> _forms = new List<FormDescriptor>
     {
-        new FormDescriptor(
+        ZombieForm(
             FormId.Zombie,
             "普通僵尸", "Normal Zombie",
             "WASD 移动 · Shift 加速 · Ctrl 蹲伏 · 空格跳跃 · 左键攀爬 · 右键扑咬",
             "WASD move · Shift sprint · Ctrl crouch · Space jump · LMB climb · RMB bite",
-            () => ImZombie.ZombiePlugin.ActiveAppearance == ImZombie.ZombiePlugin.ZombieAppearanceOption.Mushroom,
-            () => ImZombie.ZombiePlugin.CanEnter(Character.localCharacter),
-            () => ImZombie.ZombiePlugin.Enter(Character.localCharacter, ImZombie.ZombiePlugin.ZombieAppearanceOption.Mushroom),
-            ImZombie.ZombiePlugin.Exit,
-            () => ImZombie.ZombiePlugin.CameraDistance,
-            () => ImZombie.ZombiePlugin.CameraHeight,
-            () => ImZombie.ZombiePlugin.CameraFov,
-            1.5f, 6f, 0.3f, 1.8f, 60f, 110f)
-        {
-            Params =
-            {
-                new ParamDescriptor("移动速度", "Movement speed", () => ImZombie.ZombiePlugin.MovementSpeed, 0f, 40f),
-                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImZombie.ZombiePlugin.SprintMultiplier, 1f, 5f),
-                new ParamDescriptor("跳跃力", "Jump force", () => ImZombie.ZombiePlugin.JumpForce, 0f, 25f),
-                new ParamDescriptor("扑咬冷却", "Bite cooldown", () => ImZombie.ZombiePlugin.AttackCooldown, 0.1f, 5f)
-            }
-        },
-        new FormDescriptor(
+            ImZombie.ZombiePlugin.ZombieAppearanceOption.Mushroom),
+        ZombieForm(
             FormId.ZombiePlayer,
             "玩家化僵尸", "Player Zombie",
             "保留玩家装备：WASD 移动 · Shift 加速 · Ctrl 蹲伏 · 空格跳跃 · 左键攀爬 · 右键扑咬",
             "Player outfit: WASD move · Shift sprint · Ctrl crouch · Space jump · LMB climb · RMB bite",
-            () => ImZombie.ZombiePlugin.ActiveAppearance == ImZombie.ZombiePlugin.ZombieAppearanceOption.Player,
-            () => ImZombie.ZombiePlugin.CanEnter(Character.localCharacter),
-            () => ImZombie.ZombiePlugin.Enter(Character.localCharacter, ImZombie.ZombiePlugin.ZombieAppearanceOption.Player),
-            ImZombie.ZombiePlugin.Exit,
-            () => ImZombie.ZombiePlugin.CameraDistance,
-            () => ImZombie.ZombiePlugin.CameraHeight,
-            () => ImZombie.ZombiePlugin.CameraFov,
-            1.5f, 6f, 0.3f, 1.8f, 60f, 110f)
-        {
-            Params =
-            {
-                new ParamDescriptor("移动速度", "Movement speed", () => ImZombie.ZombiePlugin.MovementSpeed, 0f, 40f),
-                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImZombie.ZombiePlugin.SprintMultiplier, 1f, 5f),
-                new ParamDescriptor("跳跃力", "Jump force", () => ImZombie.ZombiePlugin.JumpForce, 0f, 25f),
-                new ParamDescriptor("扑咬冷却", "Bite cooldown", () => ImZombie.ZombiePlugin.AttackCooldown, 0.1f, 5f)
-            }
-        },
-        new FormDescriptor(
+            ImZombie.ZombiePlugin.ZombieAppearanceOption.Player),
+        ZombieForm(
             FormId.MushroomZombie,
-            "大蘑菇僵尸", "Mushroom-Man Zombie",
+            "大蘑菇僵尸", "Mushroom-Man",
             "恐僵外观：WASD 移动 · Shift 加速 · Ctrl 蹲伏 · 空格跳跃 · 左键攀爬 · 右键扑咬",
             "Phobia look: WASD move · Shift sprint · Ctrl crouch · Space jump · LMB climb · RMB bite",
-            () => ImZombie.ZombiePlugin.ActiveAppearance == ImZombie.ZombiePlugin.ZombieAppearanceOption.MushroomMan,
-            () => ImZombie.ZombiePlugin.CanEnter(Character.localCharacter),
-            () => ImZombie.ZombiePlugin.Enter(Character.localCharacter, ImZombie.ZombiePlugin.ZombieAppearanceOption.MushroomMan),
-            ImZombie.ZombiePlugin.Exit,
-            () => ImZombie.ZombiePlugin.CameraDistance,
-            () => ImZombie.ZombiePlugin.CameraHeight,
-            () => ImZombie.ZombiePlugin.CameraFov,
-            1.5f, 6f, 0.3f, 1.8f, 60f, 110f)
-        {
-            Params =
-            {
-                new ParamDescriptor("移动速度", "Movement speed", () => ImZombie.ZombiePlugin.MovementSpeed, 0f, 40f),
-                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImZombie.ZombiePlugin.SprintMultiplier, 1f, 5f),
-                new ParamDescriptor("跳跃力", "Jump force", () => ImZombie.ZombiePlugin.JumpForce, 0f, 25f),
-                new ParamDescriptor("扑咬冷却", "Bite cooldown", () => ImZombie.ZombiePlugin.AttackCooldown, 0.1f, 5f)
-            }
-        },
+            ImZombie.ZombiePlugin.ZombieAppearanceOption.MushroomMan),
         new FormDescriptor(
             FormId.Scoutmaster,
             "童军领队", "Scoutmaster",
@@ -312,119 +291,70 @@ internal static class FormRegistry
                 new ParamDescriptor("跳动速度", "Hop speed", () => StatuePlugin.JumpSpeed, 1f, 30f)
             }
         },
-        new FormDescriptor(
-            FormId.Frog,
+        CritterForm(
+            FormId.Frog, ImCritter.CritterKind.Frog,
             "青蛙", "Frog",
             "WASD 选方向 · 空格蛙跳 · 按住 Shift 跳更远 · 右键伸舌抓人",
             "WASD aim · Space leap · hold Shift for longer leap · RMB tongue grab",
-            () => ImCritter.CritterPlugin.IsActive && ImCritter.CritterPlugin.ActiveKind == ImCritter.CritterKind.Frog,
-            () => ImCritter.CritterPlugin.CanEnter(Character.localCharacter),
-            () => ImCritter.CritterPlugin.Enter(Character.localCharacter, ImCritter.CritterKind.Frog),
-            ImCritter.CritterPlugin.Exit,
-            () => ImCritter.CritterPlugin.CameraDistance(ImCritter.CritterKind.Frog),
-            () => ImCritter.CritterPlugin.CameraHeight(ImCritter.CritterKind.Frog),
-            () => ImCritter.CritterPlugin.CameraFov(ImCritter.CritterKind.Frog),
-            2f, 20f, 0.3f, 10f, 60f, 110f,
-            null)
-        {
-            Params =
-            {
-                new ParamDescriptor("蛙跳距离", "Leap distance", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Frog), 2f, 40f),
-                new ParamDescriptor("蛙跳高度", "Leap height", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Frog), 1f, 30f),
-                new ParamDescriptor("蛙跳倍率", "Leap power", () => ImCritter.CritterPlugin.JumpPower(ImCritter.CritterKind.Frog), 0.1f, 3f),
-                new ParamDescriptor("攻击冷却", "Attack cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Frog), 0.1f, 10f)
-            }
-        },
-        new FormDescriptor(
-            FormId.Beetle,
+            new ParamDescriptor("蛙跳距离", "Leap distance", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Frog), 2f, 40f),
+            new ParamDescriptor("蛙跳高度", "Leap height", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Frog), 1f, 30f),
+            new ParamDescriptor("蛙跳倍率", "Leap power", () => ImCritter.CritterPlugin.JumpPower(ImCritter.CritterKind.Frog), 0.1f, 3f),
+            new ParamDescriptor("攻击冷却", "Attack cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Frog), 0.1f, 10f)),
+        CritterForm(
+            FormId.Beetle, ImCritter.CritterKind.Beetle,
             "甲虫", "Beetle",
             "WASD 爬行 · Shift 加速（耗体力）· 右键冲撞击退",
             "WASD crawl · Shift sprint (stamina) · RMB ram knockback",
-            () => ImCritter.CritterPlugin.IsActive && ImCritter.CritterPlugin.ActiveKind == ImCritter.CritterKind.Beetle,
-            () => ImCritter.CritterPlugin.CanEnter(Character.localCharacter),
-            () => ImCritter.CritterPlugin.Enter(Character.localCharacter, ImCritter.CritterKind.Beetle),
-            ImCritter.CritterPlugin.Exit,
-            () => ImCritter.CritterPlugin.CameraDistance(ImCritter.CritterKind.Beetle),
-            () => ImCritter.CritterPlugin.CameraHeight(ImCritter.CritterKind.Beetle),
-            () => ImCritter.CritterPlugin.CameraFov(ImCritter.CritterKind.Beetle),
-            2f, 20f, 0.3f, 10f, 60f, 110f,
-            null)
-        {
-            Params =
-            {
-                new ParamDescriptor("加速倍率（耗体力）", "Sprint multiplier (stamina)", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Beetle), 1f, 5f),
-                new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Beetle), 2f, 60f),
-                new ParamDescriptor("攻击冷却", "Attack cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Beetle), 0.1f, 10f)
-            }
-        },
-        new FormDescriptor(
-            FormId.Scorpion,
+            new ParamDescriptor("加速倍率（耗体力）", "Sprint multiplier (stamina)", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Beetle), 1f, 5f),
+            new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Beetle), 2f, 60f),
+            new ParamDescriptor("攻击冷却", "Attack cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Beetle), 0.1f, 10f)),
+        CritterForm(
+            FormId.Scorpion, ImCritter.CritterKind.Scorpion,
             "蝎子", "Scorpion",
             "WASD 移动 · Shift 加速 · 空格弹跳 · 右键蜇击（击退+中毒）",
             "WASD move · Shift sprint · Space hop · RMB sting (knockback + poison)",
-            () => ImCritter.CritterPlugin.IsActive && ImCritter.CritterPlugin.ActiveKind == ImCritter.CritterKind.Scorpion,
-            () => ImCritter.CritterPlugin.CanEnter(Character.localCharacter),
-            () => ImCritter.CritterPlugin.Enter(Character.localCharacter, ImCritter.CritterKind.Scorpion),
-            ImCritter.CritterPlugin.Exit,
-            () => ImCritter.CritterPlugin.CameraDistance(ImCritter.CritterKind.Scorpion),
-            () => ImCritter.CritterPlugin.CameraHeight(ImCritter.CritterKind.Scorpion),
-            () => ImCritter.CritterPlugin.CameraFov(ImCritter.CritterKind.Scorpion),
-            2f, 20f, 0.3f, 10f, 60f, 110f,
-            null)
-        {
-            Params =
-            {
-                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Scorpion), 1f, 5f),
-                new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Scorpion), 2f, 60f),
-                new ParamDescriptor("弹跳速度", "Hop speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Scorpion), 1f, 30f),
-                new ParamDescriptor("攻击冷却", "Attack cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Scorpion), 0.1f, 10f)
-            }
-        },
-        new FormDescriptor(
-            FormId.Coconut,
+            new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Scorpion), 1f, 5f),
+            new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Scorpion), 2f, 60f),
+            new ParamDescriptor("弹跳速度", "Hop speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Scorpion), 1f, 30f),
+            new ParamDescriptor("攻击冷却", "Attack cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Scorpion), 0.1f, 10f)),
+        CritterForm(
+            FormId.Coconut, ImCritter.CritterKind.Coconut,
             "椰子", "Coconut",
             "WASD 滚动 · Shift 加速 · 空格跳跃 · 右键蓄力砸向准星 · 碎裂后当前位置恢复",
             "WASD roll · Shift sprint · Space jump · hold RMB slam at crosshair · restore where cracked",
-            () => ImCritter.CritterPlugin.IsActive && ImCritter.CritterPlugin.ActiveKind == ImCritter.CritterKind.Coconut,
-            () => ImCritter.CritterPlugin.CanEnter(Character.localCharacter),
-            () => ImCritter.CritterPlugin.Enter(Character.localCharacter, ImCritter.CritterKind.Coconut),
-            ImCritter.CritterPlugin.Exit,
-            () => ImCritter.CritterPlugin.CameraDistance(ImCritter.CritterKind.Coconut),
-            () => ImCritter.CritterPlugin.CameraHeight(ImCritter.CritterKind.Coconut),
-            () => ImCritter.CritterPlugin.CameraFov(ImCritter.CritterKind.Coconut),
-            2f, 20f, 0.3f, 10f, 60f, 110f,
-            null)
-        {
-            Params =
-            {
-                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Coconut), 1f, 5f),
-                new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Coconut), 2f, 60f),
-                new ParamDescriptor("跳跃速度", "Jump speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Coconut), 1f, 30f),
-                new ParamDescriptor("砸击冷却", "Slam cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Coconut), 0.1f, 10f)
-            }
-        },
-        new FormDescriptor(
-            FormId.Bomb,
+            new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Coconut), 1f, 5f),
+            new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Coconut), 2f, 60f),
+            new ParamDescriptor("跳跃速度", "Jump speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Coconut), 1f, 30f),
+            new ParamDescriptor("砸击冷却", "Slam cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Coconut), 0.1f, 10f)),
+        CritterForm(
+            FormId.Bomb, ImCritter.CritterKind.Bomb,
             "炸弹", "Bomb",
             "WASD/方向键滚动 · Shift 加速 · 空格跳跃 · 右键手动点燃 · 爆炸后当前位置恢复",
             "WASD/arrow keys roll · Shift sprint · Space jump · RMB light fuse · restore where exploded",
-            () => ImCritter.CritterPlugin.IsActive && ImCritter.CritterPlugin.ActiveKind == ImCritter.CritterKind.Bomb,
-            () => ImCritter.CritterPlugin.CanEnter(Character.localCharacter),
-            () => ImCritter.CritterPlugin.Enter(Character.localCharacter, ImCritter.CritterKind.Bomb),
-            ImCritter.CritterPlugin.Exit,
-            () => ImCritter.CritterPlugin.CameraDistance(ImCritter.CritterKind.Bomb),
-            () => ImCritter.CritterPlugin.CameraHeight(ImCritter.CritterKind.Bomb),
-            () => ImCritter.CritterPlugin.CameraFov(ImCritter.CritterKind.Bomb),
-            2f, 20f, 0.3f, 10f, 60f, 110f,
-            null)
+            new ParamDescriptor("推动力", "Movement force", () => ImCritter.CritterPlugin.MovementForce(ImCritter.CritterKind.Bomb), 0f, 60f),
+            new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Bomb), 1f, 5f),
+            new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Bomb), 2f, 60f),
+            new ParamDescriptor("跳跃速度", "Jump speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Bomb), 1f, 30f),
+            new ParamDescriptor("点燃冷却", "Ignite cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Bomb), 0.1f, 10f)),
+        new FormDescriptor(
+            FormId.Raven,
+            "秃鹫", "Condor",
+            "无视碰撞飞行 · WASD 移动 · 空格上升 · Ctrl 下降 · Shift 加速 · 右键攻击已禁用（含手柄对应操作）\n未安装模组的玩家看不到秃鹫和拖尾，只会看到正常玩家身体",
+            "WASD fly · Space rise · Ctrl descend · Shift sprint · RMB attack disabled, including controller secondary use\nPlayers without the mod see the normal player body, without the Condor or wing trails",
+            () => ImRaven.RavenPlugin.IsActive,
+            () => ImRaven.RavenPlugin.CanEnter(Character.localCharacter),
+            () => ImRaven.RavenPlugin.Enter(Character.localCharacter),
+            ImRaven.RavenPlugin.Exit,
+            () => ImRaven.RavenPlugin.CameraDistance,
+            () => ImRaven.RavenPlugin.CameraHeight,
+            () => ImRaven.RavenPlugin.CameraFov,
+            3f, 15f, 0.3f, 8f, 60f, 110f)
         {
             Params =
             {
-                new ParamDescriptor("推动力", "Movement force", () => ImCritter.CritterPlugin.MovementForce(ImCritter.CritterKind.Bomb), 0f, 60f),
-                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImCritter.CritterPlugin.SprintMultiplier(ImCritter.CritterKind.Bomb), 1f, 5f),
-                new ParamDescriptor("最大速度", "Max speed", () => ImCritter.CritterPlugin.MaxSpeed(ImCritter.CritterKind.Bomb), 2f, 60f),
-                new ParamDescriptor("跳跃速度", "Jump speed", () => ImCritter.CritterPlugin.JumpSpeed(ImCritter.CritterKind.Bomb), 1f, 30f),
-                new ParamDescriptor("点燃冷却", "Ignite cooldown", () => ImCritter.CritterPlugin.AttackCooldown(ImCritter.CritterKind.Bomb), 0.1f, 10f)
+                new ParamDescriptor("飞行速度", "Flight speed", () => ImRaven.RavenPlugin.MovementSpeed, 0f, 40f),
+                new ParamDescriptor("升降速度", "Vertical speed", () => ImRaven.RavenPlugin.VerticalSpeed, 0f, 30f),
+                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImRaven.RavenPlugin.SprintMultiplier, 1f, 5f)
             }
         }
     };
@@ -468,6 +398,3 @@ internal static class FormRegistry
         }
     }
 }
-
-
-

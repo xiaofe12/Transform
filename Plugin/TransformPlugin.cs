@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Reflection;
 using BepInEx;
@@ -7,6 +7,7 @@ using BepInEx.Logging;
 using HarmonyLib;
 using ImCritter;
 using ImGhost;
+using ImRaven;
 using ImScoutmaster;
 using ImTornado;
 using ImTumbleweed;
@@ -20,7 +21,7 @@ namespace Transform;
 /// Unified entry point of the Transform mod. Hosts the five static form modules
 /// (Zombie / Ghost / Tumbleweed / Tornado / Statue) and the Scoutmaster MonoBehaviour module on
 /// one shared ConfigFile and log, drives their per-frame maintenance, owns the single
-/// toggle key (hold ~1s to open/close the menu, short-press to transform/restore) and
+/// toggle key (hold ~0.4s to open/close the menu, short-press to transform/restore) and
 /// renders the dual-page TransformMenu.
 ///
 /// Each module keeps its own proven safety nets — endgame airport patches, scene-load
@@ -32,24 +33,25 @@ public sealed class TransformPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.github.Thanks.Transform";
     public const string PluginName = "Transform";
-    public const string PluginVersion = "0.9.10";
+    public const string PluginVersion = "0.9.11";
 
     internal static TransformPlugin Instance { get; private set; }
     internal static ManualLogSource Log { get; private set; }
 
-    /// <summary>Single toggle key: hold ~1 second to open/close the menu, short-press to
+    /// <summary>Single toggle key: hold ~0.4 seconds to open/close the menu, short-press to
     /// transform into the last form / restore the original form.</summary>
     internal ConfigEntry<KeyCode> MenuKey;
 
     /// <summary>UI 整体缩放（1~2，默认 1），标题栏下拉框实时调整。</summary>
     internal ConfigEntry<float> MenuScale;
+    internal ConfigEntry<bool> ShowControlHints;
 
-    private const float DefaultMenuHoldSeconds = 1f;
+    private const float DefaultMenuHoldSeconds = 0.4f;
     private const float ExternalCameraRecoverySeconds = 1.0f;
     private const float ExternalCameraRepairMaxDistance = 35f;
     private const float DefaultPlayerCameraFov = 70f;
     private const int FormSwitchRestoreFrames = 6;
-    private const float AsyncFormEnterWaitSeconds = 3f;
+    private const float AsyncFormEnterWaitSeconds = 12f;
 
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -80,12 +82,14 @@ public sealed class TransformPlugin : BaseUnityPlugin
         Log = Logger;
 
         MenuKey = Config.Bind("Menu", "MenuKey", KeyCode.F,
-            "Single toggle key. Hold ~1 second to open/close the transform menu; short-press " +
+            "Single toggle key. Hold ~0.4 seconds to open/close the transform menu; short-press " +
             "while transformed to restore your original form, or re-enter the last form.");
 
         MenuScale = Config.Bind("Menu", "MenuScale", 1f,
             new ConfigDescription("UI menu overall scale (1-2).",
                 new AcceptableValueRange<float>(1f, 2f)));
+
+        ShowControlHints = Config.Bind("Menu", "ShowControlHints", true, "Show controls while transformed.");
 
         Core.Localization.Initialize(Logger);
 
@@ -102,6 +106,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
         // abort Awake (one such abort left every form dead until the patch was fixed).
         _harmony = new Harmony(PluginGuid);
         RunGuarded("core patches", () => _harmony.PatchAll(typeof(Core.TransformHarmonyPatches)));
+        RunGuarded("creature stamina", () => _harmony.PatchAll(typeof(Core.CreatureStamina)));
         RunGuarded("canEmote guard", () => Core.TransformHarmonyPatches.InstallCanEmoteGuard(_harmony));
         RunGuarded("emote wheel guard", () => Core.TransformHarmonyPatches.InstallEmoteWheelGuard(_harmony));
         RunGuarded("PeakCinema NRE guard", () => Core.TransformHarmonyPatches.InstallPeakCinemaGuard(_harmony));
@@ -111,6 +116,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
         RunGuarded("zombie module", () => ZombiePlugin.Initialize(Config, Logger));
         RunGuarded("wind module", () => WindPlugin.Initialize(Config, Logger));
         RunGuarded("ghost module", () => GhostPlugin.Initialize(Config, Logger));
+        RunGuarded("condor module", () => RavenPlugin.Initialize(Config, Logger));
         RunGuarded("tumbleweed module", () => TumbleweedPlugin.Initialize(Config, Logger));
         RunGuarded("statue module", () => Statue.StatuePlugin.Initialize(Config, Logger));
         RunGuarded("critter module", () => CritterPlugin.Initialize(Config, Logger));
@@ -127,8 +133,8 @@ public sealed class TransformPlugin : BaseUnityPlugin
         // 场景卸载时清空本地形态状态，防止重进大厅后短按 F 误触上次变身。
         SceneManager.sceneUnloaded += OnSceneUnloaded;
 
-        Logger.LogInfo("[Transform] Unified mod loaded: normal zombie, player zombie, mushroom-man zombie, scoutmaster, ghost, tumbleweed, tornado, statue, frog, beetle, scorpion, coconut and bomb forms.");
-        Logger.LogInfo("[Transform] Hold " + MenuKey.Value + " for ~1s to open/close the menu; tap it to transform/restore.");
+        Logger.LogInfo("[Transform] Unified mod loaded: normal zombie, player zombie, mushroom-man zombie, scoutmaster, ghost, tumbleweed, tornado, statue, frog, beetle, scorpion, coconut, bomb and condor forms.");
+        Logger.LogInfo("[Transform] Hold " + MenuKey.Value + " for ~0.4s to open/close the menu; tap it to transform/restore.");
     }
 
     /// <summary>场景卸载时清除本地形态状态：上次形态 + 菜单选中/双击状态 + 关闭菜单。</summary>
@@ -138,6 +144,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
         {
             return;
         }
+        Core.RestoreSafety.Reset();
         Instance._lastFormId = null;
         Core.TransformMenu.ClearSelection();
         Core.TransformMenu.SetOpen(false);
@@ -159,17 +166,20 @@ public sealed class TransformPlugin : BaseUnityPlugin
         ZombiePlugin.Tick();
         WindPlugin.Tick();
         GhostPlugin.Tick();
+        RavenPlugin.Tick();
         TumbleweedPlugin.Tick();
         Statue.StatuePlugin.Tick();
         CritterPlugin.Tick();
         // The Scoutmaster module self-ticks through its own MonoBehaviour Update.
 
+        RunGuarded("restore safety", Core.RestoreSafety.Tick);
         HandleToggleKey();
     }
 
     private void OnGUI()
     {
         Core.TransformMenu.OnGUI();
+        Core.FormControlHints.OnGUI(this);
     }
 
     /// <summary>
@@ -296,6 +306,8 @@ public sealed class TransformPlugin : BaseUnityPlugin
     private IEnumerator EnterFormRoutine(Core.FormId formId)
     {
         _enteringForm = true;
+        Core.FormRegistry.FormDescriptor attempted = null;
+        bool completed = false;
         try
         {
             if (Core.FormRegistry.AnyActive)
@@ -326,6 +338,8 @@ public sealed class TransformPlugin : BaseUnityPlugin
             try
             {
                 Core.CarryGuard.DropBeforeTransform(Character.localCharacter, Log);
+                Core.RestoreSafety.Begin(Character.localCharacter);
+                attempted = target;
                 entered = target.Enter();
             }
             catch (Exception ex) { Log.LogError("[Transform] Failed to enter " + target.Name + ":\n" + ex); }
@@ -335,12 +349,13 @@ public sealed class TransformPlugin : BaseUnityPlugin
                 yield return WaitForAsyncFormEnter(target.Id);
                 if (target.Id == Core.FormId.Scoutmaster)
                 {
-                    entered = ImScoutmaster.Plugin.Instance != null && ImScoutmaster.Plugin.Instance.IsFormActive;
+                    entered = ImScoutmaster.Plugin.Instance != null && ImScoutmaster.Plugin.Instance.IsFormActive && !ImScoutmaster.Plugin.Instance.IsSwitching;
                 }
             }
 
             if (entered)
             {
+                completed = true;
                 _lastFormId = target.Id;
                 Log.LogInfo("[Transform] Entered form: " + target.Name);
             }
@@ -351,6 +366,14 @@ public sealed class TransformPlugin : BaseUnityPlugin
         }
         finally
         {
+            if (attempted != null && !completed)
+            {
+                var cleanup = new Core.CleanupSequence((step, ex) => Log?.LogWarning("[Transform] Entry rollback " + step + ": " + ex));
+                cleanup.Step("form", attempted.Exit);
+                cleanup.Step("HUD", Core.TransformHud.Restore);
+                cleanup.Step("control recovery", () => BeginPostRestoreRecovery("failed entry"));
+                Core.RestoreSafety.Reset();
+            }
             _enteringForm = false;
         }
     }
@@ -761,6 +784,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
         CritterPlugin.Shutdown();
         TumbleweedPlugin.Shutdown();
         GhostPlugin.Shutdown();
+        RavenPlugin.Shutdown();
         WindPlugin.Shutdown();
         ZombiePlugin.Shutdown();
         // The Scoutmaster module cleans itself up in its own OnDestroy (host object teardown).

@@ -53,6 +53,7 @@
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="Unity.InputSystem">
       <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Unity.InputSystem.dll</HintPath>
       <Private>False</Private>
@@ -75,6 +76,10 @@
     </Reference>
     <Reference Include="UnityEngine.AudioModule">
       <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
@@ -109,6 +114,7 @@
       <HintPath>$(PEAKRoot)\PEAK_Data\Managed\UnityEngine.UIModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="Zorro.ControllerSupport"><HintPath>$(PEAKRoot)\PEAK_Data\Managed\Zorro.ControllerSupport.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="Zorro.Core.Runtime">
       <HintPath>$(PEAKRoot)\PEAK_Data\Managed\Zorro.Core.Runtime.dll</HintPath>
       <Private>False</Private>
@@ -122,38 +128,69 @@
     <Compile Include="Core\TransformState.cs" />
     <Compile Include="Core\RoomPolicy.cs" />
     <Compile Include="Core\GameInput.cs" />
+    <Compile Include="Core\CleanupSequence.cs" />
+    <Compile Include="Core\SafeRestoreHistory.cs" />
+    <Compile Include="Core\RestoreSafety.cs" />
+    <Compile Include="Forms\Raven\CondorFlightState.cs" />
+    <Compile Include="Forms\Raven\CondorFlightPresentation.cs" />
+    <Compile Include="UI\FormControlHints.cs" />
+    <Compile Include="UI\ControlHintsLayout.cs" />
+    <Compile Include="Core\FlightMotion.cs" />
+    <Compile Include="Core\CameraStateSafety.cs" />
+    <Compile Include="Core\FlightCameraRig.cs" />
     <Compile Include="Core\CarryGuard.cs" />
     <Compile Include="Core\TransformHud.cs" />
+    <Compile Include="Core\CreatureStamina.cs" />
     <Compile Include="Core\TransformHarmonyPatches.cs" />
     <Compile Include="Core\PatchUtility.cs" />
     <Compile Include="Core\FormValidation.cs" />
     <Compile Include="Core\ModPresence.cs" />
     <Compile Include="Core\ThirdPartyCameras.cs" />
     <Compile Include="UI\TransformMenu.cs" />
-    <Compile Include="Statue\StatuePlugin.cs" />
-    <Compile Include="Statue\StatueController.cs" />
-    <Compile Include="Statue\StatueHarmonyPatches.cs" />
-    <Compile Include="Zombie\ZombiePlugin.cs" />
-    <Compile Include="Zombie\ZombieController.cs" />
-    <Compile Include="Zombie\ZombieHarmonyPatches.cs" />
-    <Compile Include="Zombie\StatusBarGuard.cs" />
-    <Compile Include="Ghost\GhostPlugin.cs" />
-    <Compile Include="Ghost\GhostController.cs" />
-    <Compile Include="Ghost\GhostHarmonyPatches.cs" />
-    <Compile Include="Tumbleweed\TumbleweedPlugin.cs" />
-    <Compile Include="Tumbleweed\TumbleweedController.cs" />
-    <Compile Include="Tumbleweed\TumbleweedHarmonyPatches.cs" />
-    <Compile Include="Wind\WindPlugin.cs" />
-    <Compile Include="Wind\TornadoController.cs" />
-    <Compile Include="Wind\WindHarmonyPatches.cs" />
-    <Compile Include="Scoutmaster\Plugin.cs" />
-    <Compile Include="Scoutmaster\PlayerScoutmasterController.cs" />
-    <Compile Include="Scoutmaster\ScoutmasterHarmonyPatches.cs" />
-    <Compile Include="Scoutmaster\ControlledScoutmasterVisualSync.cs" />
-    <Compile Include="Critters\CritterPlugin.cs" />
-    <Compile Include="Critters\CritterController.cs" />
-    <Compile Include="Critters\CritterHarmonyPatches.cs" />
+    <Compile Include="UI\TransformMenuLayout.cs" />
+    <Compile Include="Forms\Statue\StatuePlugin.cs" />
+    <Compile Include="Forms\Statue\StatueController.cs" />
+    <Compile Include="Forms\Statue\StatuePhysicsState.cs" />
+    <Compile Include="Forms\Statue\StatueHarmonyPatches.cs" />
+    <Compile Include="Forms\Zombie\ZombiePlugin.cs" />
+    <Compile Include="Forms\Zombie\ZombieController.cs" />
+    <Compile Include="Forms\Zombie\ZombieGuiContext.cs" />
+    <Compile Include="Forms\Zombie\ZombieHarmonyPatches.cs" />
+    <Compile Include="Forms\Zombie\StatusBarGuard.cs" />
+    <Compile Include="Forms\Ghost\GhostPlugin.cs" />
+    <Compile Include="Forms\Ghost\GhostController.cs" />
+    <Compile Include="Forms\Ghost\GhostHarmonyPatches.cs" />
+    <Compile Include="Forms\Raven\RavenPlugin.cs" />
+    <Compile Include="Forms\Raven\RavenController.cs" />
+    <Compile Include="Forms\Raven\CondorVisualAsset.cs" />
+    <Compile Include="Forms\Raven\CondorGameResources.cs" />
+    <Compile Include="Forms\Raven\CondorRenderSettings.cs" />
+    <Compile Include="Forms\Raven\CondorNetworkPose.cs" />
+    <Compile Include="Forms\Raven\RavenHarmonyPatches.cs" />
+    <Compile Include="Forms\Tumbleweed\TumbleweedPlugin.cs" />
+    <Compile Include="Forms\Tumbleweed\TumbleweedController.cs" />
+    <Compile Include="Forms\Tumbleweed\TumbleweedHarmonyPatches.cs" />
+    <Compile Include="Forms\Wind\WindPlugin.cs" />
+    <Compile Include="Forms\Wind\TornadoController.cs" />
+    <Compile Include="Forms\Wind\WindHarmonyPatches.cs" />
+    <Compile Include="Forms\Scoutmaster\Plugin.cs" />
+    <Compile Include="Forms\Scoutmaster\ScoutmasterControlState.cs" />
+    <Compile Include="Forms\Scoutmaster\ScoutmasterFallState.cs" />
+    <Compile Include="Forms\Scoutmaster\ScoutmasterDataLifecycle.cs" />
+    <Compile Include="Forms\Scoutmaster\ScoutmasterCameraRig.cs" />
+    <Compile Include="Forms\Scoutmaster\ScoutmasterBodyPose.cs" />
+    <Compile Include="Forms\Scoutmaster\ScoutmasterRendererState.cs" />
+    <Compile Include="Forms\Scoutmaster\PlayerScoutmasterController.cs" />
+    <Compile Include="Forms\Scoutmaster\ScoutmasterHarmonyPatches.cs" />
+    <Compile Include="Forms\Scoutmaster\ControlledScoutmasterVisualSync.cs" />
+    <Compile Include="Forms\Critters\CritterPlugin.cs" />
+    <Compile Include="Forms\Critters\CritterController.cs" />
+    <Compile Include="Forms\Critters\CritterHarmonyPatches.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Forms\Raven\Assets\CondorResources.bin" LogicalName="Transform.CondorResources" />
   </ItemGroup>
 
 </Project>

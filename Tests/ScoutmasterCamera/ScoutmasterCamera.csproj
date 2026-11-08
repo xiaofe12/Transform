@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/scoutmaster-camera-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Forms/Scoutmaster/ScoutmasterCameraRig.cs" Link="ScoutmasterCameraRig.cs" />
+    <Compile Include="../../Forms/Scoutmaster/ScoutmasterDataLifecycle.cs" Link="ScoutmasterDataLifecycle.cs" />
+    <Compile Include="CameraDoubles.cs" /><Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

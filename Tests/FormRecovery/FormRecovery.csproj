@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/recovery-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(PEAKRoot)/PEAK_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Compile Include="../../Core/CleanupSequence.cs" Link="CleanupSequence.cs" />
+    <Compile Include="../../Core/SafeRestoreHistory.cs" Link="SafeRestoreHistory.cs" />
+    <Compile Include="../../Forms/Raven/CondorFlightState.cs" Link="CondorFlightState.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

@@ -9,6 +9,10 @@ namespace Transform.Core;
 /// </summary>
 internal static class FormValidation
 {
+	// Independent possession leaves the source's native player flags unchanged.
+	internal static bool HasIndependentScoutmasterControl => ImScoutmaster.Plugin.Instance != null
+		&& (ImScoutmaster.Plugin.Instance.IsFormActive || ImScoutmaster.Plugin.Instance.IsSwitching);
+
 	/// <summary>模块标签 → 最近失败消息。同键消息"沿变沿打"去重（菜单每帧查询会重复调用），恢复后再次失败重新记录。</summary>
 	private static readonly Dictionary<string, string> _lastFailureByKey = new Dictionary<string, string>();
 
@@ -41,7 +45,7 @@ internal static class FormValidation
 		{
 			return "No local character found.";
 		}
-		if (checkSpecialForm && (character.isZombie || character.isBot || character.isScoutmaster))
+		if (checkSpecialForm && (HasIndependentScoutmasterControl || character.isZombie || character.isBot || character.isScoutmaster))
 		{
 			return "Cannot transform while in another special form.";
 		}

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/zombie-presentation-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/UnityEngine.CoreModule.dll</HintPath></Reference>
+    <Compile Include="../../Core/CameraStateSafety.cs" Link="CameraStateSafety.cs" />
+    <Compile Include="../../Forms/Zombie/ZombieGuiContext.cs" Link="ZombieGuiContext.cs" />
+    <Compile Include="StateDoubles.cs" /><Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

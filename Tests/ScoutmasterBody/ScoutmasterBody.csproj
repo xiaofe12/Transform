@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/scoutmaster-body-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Core/CameraStateSafety.cs" Link="CameraStateSafety.cs" />
+    <Compile Include="../../Forms/Scoutmaster/ScoutmasterBodyPose.cs" Link="ScoutmasterBodyPose.cs" />
+    <Compile Include="HierarchyDoubles.cs" /><Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

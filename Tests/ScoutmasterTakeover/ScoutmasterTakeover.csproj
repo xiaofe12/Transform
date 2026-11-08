@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/scoutmaster-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/UnityEngine.CoreModule.dll</HintPath></Reference>
+    <Reference Include="Mono.Cecil"><HintPath>$(PEAKRoot)/BepInEx/core/Mono.Cecil.dll</HintPath></Reference>
+    <Compile Include="../../Forms/Scoutmaster/ScoutmasterControlState.cs" Link="ScoutmasterControlState.cs" />
+    <Compile Include="../../Forms/Scoutmaster/ScoutmasterFallState.cs" Link="ScoutmasterFallState.cs" />
+    <Compile Include="../../Core/SafeRestoreHistory.cs" Link="SafeRestoreHistory.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

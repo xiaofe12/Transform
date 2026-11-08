@@ -6,18 +6,8 @@ using UnityEngine;
 namespace Transform.Core;
 
 /// <summary>
-/// Shared HUD filter for every transformation form. Two visibility policies:
-///
-///  - Forms that can safely keep the player's status bar visible call <see cref="TickHide()"/>,
-///    which hides everything EXCEPT the stamina group (staminaCanvasGroup, falling back to the
-///    StaminaBar);
-///  - All other forms (critters, ghost, tumbleweed, tornado, statue) do not use the player's
-///    stamina, so <see cref="TickHide(bool)"/> with keepStatusBar:false hides the whole HUD
-///    including the status bar.
-///  - While a third-party free camera (PeakSpectatorMode / PeakCinema) is active, this filter
-///    yields the general HUD to that camera and only hides the status bar when requested. This
-///    avoids fighting spectator/cinema overlays while still suppressing controlled Scoutmaster
-///    and zombie status bars.
+/// Shared HUD filter: all forms hide the stamina group. External free cameras retain
+/// control of other HUD elements; the status bar stays hidden until form exit.
 ///
 ///  - the Canvas_Names overlay (floating player names) is hidden as well, re-checked on a
 ///    throttled timer because it can spawn after the transformation (scene load);
@@ -35,46 +25,19 @@ internal static class TransformHud
     private static float _nextCanvasSearchTime;
     private static Coroutine _restorePulse;
 
-    /// <summary>Keeps the player's status bar visible.</summary>
     internal static void TickHide()
-    {
-        TickHide(true);
-    }
-
-    /// <summary>Keeps the status bar during normal play, but suppresses it for third-party free cameras.</summary>
-    internal static void TickHideKeepStatusUnlessExternalCamera()
-    {
-        TickHide(!ThirdPartyCameras.ExternalCameraActive);
-    }
-
-    /// <summary>Called every frame by each form controller while its form is active.
-    /// keepStatusBar=false also hides the stamina group — for forms that don't run on the
-    /// player's real stamina.</summary>
-    internal static void TickHide(bool keepStatusBar)
     {
         try
         {
             GUIManager gui = GUIManager.instance;
-            if (gui != null && gui.hudCanvas != null)
+            if (gui != null)
             {
-                if (ThirdPartyCameras.ExternalCameraActive)
-                {
-                    if (!keepStatusBar) HideStatusBar(gui);
-                    return;
-                }
-
-                GameObject keep = null;
-                if (keepStatusBar)
-                {
-                    if (gui.staminaCanvasGroup != null) keep = gui.staminaCanvasGroup.gameObject;
-                    else if (gui.bar != null) keep = gui.bar.gameObject;
-                    RestoreStatusBar(gui);
-                }
+                HideStatusBar(gui);
+                if (ThirdPartyCameras.ExternalCameraActive || gui.hudCanvas == null) return;
 
                 foreach (UnityEngine.Transform child in gui.hudCanvas.transform)
                 {
                     if (child == null) continue;
-                    if (keep != null && (child == keep.transform || keep.transform.IsChildOf(child))) continue;
                     HideChild(child.gameObject);
                 }
             }
@@ -104,38 +67,13 @@ internal static class TransformHud
         }
     }
 
-    private static void RestoreStatusBar(GUIManager gui)
-    {
-        if (gui == null) return;
-
-        if (gui.hudCanvas != null && !gui.hudCanvas.gameObject.activeSelf)
-        {
-            gui.hudCanvas.gameObject.SetActive(true);
-        }
-
-        if (gui.staminaCanvasGroup != null)
-        {
-            RestoreStatusObject(gui.staminaCanvasGroup.gameObject);
-            return;
-        }
-
-        if (gui.bar != null)
-        {
-            RestoreStatusObject(gui.bar.gameObject);
-        }
-    }
-
-    private static void RestoreStatusObject(GameObject gameObject)
-    {
-        if (gameObject == null) return;
-        HiddenChildren.Remove(gameObject);
-        if (!gameObject.activeSelf) gameObject.SetActive(true);
-    }
+    // Shared with optional HUD-mod guards; Restore() restores the captured active state.
+    internal static void HideStatusObject(GameObject gameObject) { HideChild(gameObject); }
 
     private static void HideChild(GameObject gameObject)
     {
-        if (gameObject == null || HiddenChildren.ContainsKey(gameObject)) return;
-        HiddenChildren[gameObject] = gameObject.activeSelf;
+        if (gameObject == null) return;
+        if (!HiddenChildren.ContainsKey(gameObject)) HiddenChildren[gameObject] = gameObject.activeSelf;
         if (gameObject.activeSelf) gameObject.SetActive(false);
     }
 

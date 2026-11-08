@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/condor-network-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/Assembly-CSharp.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/UnityEngine.CoreModule.dll</HintPath></Reference>
+    <Reference Include="Unity.Mathematics"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/Unity.Mathematics.dll</HintPath></Reference>
+    <Reference Include="Zorro.Core.Runtime"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/Zorro.Core.Runtime.dll</HintPath></Reference>
+    <Compile Include="../../Forms/Raven/CondorNetworkPose.cs" Link="CondorNetworkPose.cs" />
+    <Compile Include="../../Core/FlightMotion.cs" Link="FlightMotion.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

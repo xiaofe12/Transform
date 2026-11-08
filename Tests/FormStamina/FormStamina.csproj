@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net472</TargetFramework><LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/form-stamina-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="0Harmony"><HintPath>$(PEAKRoot)/BepInEx/core/0Harmony.dll</HintPath></Reference>
+    <Reference Include="Mono.Cecil"><HintPath>$(PEAKRoot)/BepInEx/core/Mono.Cecil.dll</HintPath></Reference>
+    <Compile Include="../../Core/CreatureStamina.cs" Link="CreatureStamina.cs" />
+    <Compile Include="../../Core/TransformHud.cs" Link="TransformHud.cs" />
+    <Compile Include="StateDoubles.cs" /><Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>
