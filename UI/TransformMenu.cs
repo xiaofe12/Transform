@@ -577,6 +577,8 @@ internal static class TransformMenu
             return Localization.Tr("注意：无模组主机下拾取可能复制", "No-mod host: pickup may duplicate");
         switch (id)
         {
+            case FormId.Crow:
+                return Localization.Tr("注意：渡鸦外观需对方更新模组", "Warning: Raven needs updated mod");
             case FormId.Raven:
                 return Localization.Tr("注意：秃鹫外观需对方安装模组", "Warning: bird requires the mod");
             case FormId.Statue:

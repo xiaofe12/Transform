@@ -28,14 +28,10 @@ internal static class PatchUtility
 	{
 		try
 		{
-			MethodInfo targetMethod = AccessTools.Method(declaringType, methodName, parameterTypes);
-			if (targetMethod == null)
-			{
-				// PEAKERRpcInfo patcher appends a PhotonMessageInfo parameter to every [PunRPC]
-				// method at runtime, so exact-signature lookups miss. Retry by name only: our
-				// prefixes inject at most Character __instance, which patching by name supports.
-				targetMethod = AccessTools.Method(declaringType, methodName);
-			}
+			// Current PEAK adds PhotonMessageInfo directly to native RPC signatures.
+			// Resolve the known arguments plus that optional suffix without issuing
+			// Harmony's missing-method warning for every module at startup.
+			MethodInfo targetMethod = FindCompatibleMethod(declaringType, methodName, parameterTypes);
 			if (targetMethod == null)
 			{
 				log?.LogInfo("[" + moduleTag + "] Optional " + description + " patch skipped; method is not present in this game build.");
@@ -57,6 +53,27 @@ internal static class PatchUtility
 			log?.LogWarning("[" + moduleTag + "] Optional " + description + " patch failed: " + ex.Message);
 			return false;
 		}
+	}
+
+	internal static MethodInfo FindCompatibleMethod(Type type, string name, Type[] arguments)
+	{
+		arguments = arguments ?? Type.EmptyTypes;
+		const BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+		// Prefer an exact overload if both signatures exist in a transitional build.
+		for (int suffix = 0; suffix <= 1; suffix++)
+		for (Type current = type; current != null; current = current.BaseType)
+		foreach (MethodInfo method in current.GetMethods(flags | BindingFlags.DeclaredOnly))
+		{
+			if (method.Name != name || method.ContainsGenericParameters) continue;
+			ParameterInfo[] parameters = method.GetParameters();
+			if (parameters.Length != arguments.Length + suffix) continue;
+			if (suffix == 1 && parameters[parameters.Length - 1].ParameterType != typeof(Photon.Pun.PhotonMessageInfo)) continue;
+			bool matches = true;
+			for (int i = 0; i < arguments.Length; i++)
+				if (parameters[i].ParameterType != arguments[i]) { matches = false; break; }
+			if (matches) return method;
+		}
+		return null;
 	}
 
 	/// <summary>

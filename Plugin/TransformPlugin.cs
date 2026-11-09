@@ -33,7 +33,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.github.Thanks.Transform";
     public const string PluginName = "Transform";
-    public const string PluginVersion = "0.9.11";
+    public const string PluginVersion = "0.9.12";
 
     internal static TransformPlugin Instance { get; private set; }
     internal static ManualLogSource Log { get; private set; }
@@ -133,7 +133,7 @@ public sealed class TransformPlugin : BaseUnityPlugin
         // 场景卸载时清空本地形态状态，防止重进大厅后短按 F 误触上次变身。
         SceneManager.sceneUnloaded += OnSceneUnloaded;
 
-        Logger.LogInfo("[Transform] Unified mod loaded: normal zombie, player zombie, mushroom-man zombie, scoutmaster, ghost, tumbleweed, tornado, statue, frog, beetle, scorpion, coconut, bomb and condor forms.");
+        Logger.LogInfo("[Transform] Unified mod loaded: normal zombie, player zombie, mushroom-man zombie, scoutmaster, ghost, tumbleweed, tornado, statue, frog, beetle, scorpion, coconut, bomb, condor and raven forms.");
         Logger.LogInfo("[Transform] Hold " + MenuKey.Value + " for ~0.4s to open/close the menu; tap it to transform/restore.");
     }
 

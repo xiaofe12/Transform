@@ -28,11 +28,12 @@ internal static class RoomPolicy
     private const string RoomFormsPropertyKey = "Thanks.Transform.Forms";
     private const string RoomSettingsPropertyKey = "Thanks.Transform.Settings";
     private const string ModPlayerProperty = "Thanks.Transform.Mod";
-    private const int FormCount = (int)FormId.Raven + 1;
+    private const int FormCount = (int)FormId.Crow + 1;
     private const int AllFormsMask = (1 << FormCount) - 1;
     private const int LegacyTenFormsMask = (1 << 10) - 1;
     private const int LegacyElevenFormsMask = (1 << 11) - 1;
     private const int LegacyTwelveFormsMask = (1 << 12) - 1;
+    private const int LegacyFourteenFormsMask = (1 << 14) - 1;
     private const int LegacyThirteenFormsMask = (1 << 13) - 1;
 
     private static ManualLogSource _log;
@@ -123,11 +124,12 @@ internal static class RoomPolicy
             "变身策略：房主安装模组时由房主同步全房间；房主未安装模组时仅本地生效。" +
             "AllowAll = 允许所有场景使用；LobbyOnly = 仅在大厅（机场）可用；Disabled = 禁用变身模组。");
         _formsMaskEntry = config.Bind("Room", "EnabledFormsMask", AllFormsMask,
-            "允许的形态 bitmask：房主安装模组时由房主同步全房间；房主未安装模组时仅本地生效。默认 16383 = 全部启用。");
+            "允许的形态 bitmask：房主安装模组时由房主同步全房间；房主未安装模组时仅本地生效。默认 32767 = 全部启用。");
         if (_formsMaskEntry.Value == LegacyTenFormsMask
             || _formsMaskEntry.Value == LegacyElevenFormsMask
             || _formsMaskEntry.Value == LegacyTwelveFormsMask
-            || _formsMaskEntry.Value == LegacyThirteenFormsMask)
+            || _formsMaskEntry.Value == LegacyThirteenFormsMask
+            || _formsMaskEntry.Value == LegacyFourteenFormsMask)
         {
             _formsMaskEntry.Value = AllFormsMask;
         }

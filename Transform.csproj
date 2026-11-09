@@ -161,6 +161,10 @@
     <Compile Include="Forms\Ghost\GhostController.cs" />
     <Compile Include="Forms\Ghost\GhostHarmonyPatches.cs" />
     <Compile Include="Forms\Raven\RavenPlugin.cs" />
+    <Compile Include="Forms\Raven\BirdFlightSettings.cs" />
+    <Compile Include="Forms\Raven\CrowVisualAsset.cs" />
+    <Compile Include="Forms\Raven\CrowFlightCycle.cs" />
+    <Compile Include="Forms\Raven\CrowGroundState.cs" />
     <Compile Include="Forms\Raven\RavenController.cs" />
     <Compile Include="Forms\Raven\CondorVisualAsset.cs" />
     <Compile Include="Forms\Raven\CondorGameResources.cs" />

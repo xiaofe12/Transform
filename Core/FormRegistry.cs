@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using BepInEx.Configuration;
 using Transform.Statue;
@@ -21,7 +21,8 @@ internal enum FormId
     Scorpion,
     Coconut,
     Bomb,
-    Raven
+    Raven,
+    Crow
 }
 
 /// <summary>
@@ -355,6 +356,27 @@ internal static class FormRegistry
                 new ParamDescriptor("飞行速度", "Flight speed", () => ImRaven.RavenPlugin.MovementSpeed, 0f, 40f),
                 new ParamDescriptor("升降速度", "Vertical speed", () => ImRaven.RavenPlugin.VerticalSpeed, 0f, 30f),
                 new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImRaven.RavenPlugin.SprintMultiplier, 1f, 5f)
+            }
+        },
+        new FormDescriptor(
+            FormId.Crow,
+            "渡鸦", "Raven",
+            "地面保持原地待机，不支持步行 · 空格起飞 / 上升 · 飞行时 WASD 移动 · Ctrl 下降，触地后待机 · Shift 加速 · 右键攻击已禁用（兼容手柄）\n未安装新版模组的玩家看不到渡鸦，只会看到正常玩家身体。",
+            "Perch with native Idle on the ground; no walking · Space take off / rise · WASD move in flight · Ctrl descend / land · Shift boost · RMB/controller attack disabled\nPlayers without this version of the mod see the normal player body, without the Raven.",
+            () => ImRaven.RavenPlugin.IsCrowActive,
+            () => ImRaven.RavenPlugin.CanEnter(Character.localCharacter, true),
+            () => ImRaven.RavenPlugin.Enter(Character.localCharacter, true),
+            ImRaven.RavenPlugin.Exit,
+            () => ImRaven.RavenPlugin.CrowSettings.CameraDistance,
+            () => ImRaven.RavenPlugin.CrowSettings.CameraHeight,
+            () => ImRaven.RavenPlugin.CrowSettings.CameraFov,
+            3f, 15f, 0.3f, 8f, 60f, 110f)
+        {
+            Params =
+            {
+                new ParamDescriptor("飞行速度", "Flight speed", () => ImRaven.RavenPlugin.CrowSettings.MovementSpeed, 0f, 40f),
+                new ParamDescriptor("升降速度", "Vertical speed", () => ImRaven.RavenPlugin.CrowSettings.VerticalSpeed, 0f, 30f),
+                new ParamDescriptor("加速倍率", "Sprint multiplier", () => ImRaven.RavenPlugin.CrowSettings.SprintMultiplier, 1f, 5f)
             }
         }
     };

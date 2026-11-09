@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../../.build/bird-tests/bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/UnityEngine.CoreModule.dll</HintPath></Reference>
+    <Reference Include="PhotonUnityNetworking"><HintPath>$(PEAKRoot)/PEAK_Data/Managed/PhotonUnityNetworking.dll</HintPath></Reference>
+    <Reference Include="BepInEx"><HintPath>$(PEAKRoot)/BepInEx/core/BepInEx.dll</HintPath></Reference>
+    <Reference Include="0Harmony"><HintPath>$(PEAKRoot)/BepInEx/core/0Harmony.dll</HintPath></Reference>
+    <Reference Include="Mono.Cecil"><HintPath>$(PEAKRoot)/BepInEx/core/Mono.Cecil.dll</HintPath></Reference>
+    <Compile Include="../../Core/PatchUtility.cs" Link="PatchUtility.cs" />
+    <Compile Include="../../Forms/Raven/CrowFlightCycle.cs" Link="CrowFlightCycle.cs" />
+    <Compile Include="../../Forms/Raven/CrowGroundState.cs" Link="CrowGroundState.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

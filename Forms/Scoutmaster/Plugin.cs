@@ -5303,6 +5303,9 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 			{
 				return;
 			}
+			// Current PEAK accepts WarpPlayerRPC only from the MasterClient.
+			// Normal source pose publication remains the authoritative hide path.
+			if (PhotonNetwork.InRoom && !PhotonNetwork.OfflineMode && !PhotonNetwork.IsMasterClient) return;
 		
 			try
 			{
@@ -5328,7 +5331,8 @@ public sealed class Plugin : MonoBehaviour, Photon.Realtime.IInRoomCallbacks
 				PhotonView view = _sourceCharacter.photonView;
 			view.RPC("RPCA_UnFall", RpcTarget.Others);
 			view.RPC("ReviveCharacter", RpcTarget.Others, false);
-			view.RPC("WarpPlayerRPC", RpcTarget.Others, position, false);
+			if (!PhotonNetwork.InRoom || PhotonNetwork.OfflineMode || PhotonNetwork.IsMasterClient)
+				view.RPC("WarpPlayerRPC", RpcTarget.Others, position, false);
 			}
 			catch (Exception ex)
 			{

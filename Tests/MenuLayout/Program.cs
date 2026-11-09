@@ -9,6 +9,7 @@ using UnityEngine;
 internal static class Program
 {
     private static int _checks;
+    private const int FormCount = 15;
     private static void Check(bool condition, string message)
     {
         _checks++;
@@ -54,8 +55,8 @@ internal static class Program
             Check(!layout.Grid.Overlaps(layout.Details), context + ": grid overlaps actions");
             Check(layout.Details.height >= 144, context + ": action buttons clipped");
             Check(layout.CardWidth >= 240, context + ": form names too narrow");
-            Rect view = new Rect(0, 0, layout.Grid.width - 20, layout.ViewHeight(14));
-            for (int card = 0; card < 14; card++)
+            Rect view = new Rect(0, 0, layout.Grid.width - 20, layout.ViewHeight(FormCount));
+            for (int card = 0; card < FormCount; card++)
             {
                 Check(Contains(view, layout.Card(card)), context + ": inaccessible card " + card);
                 Rect toggle = TransformMenuLayout.FormSwitch(layout.Card(card));
@@ -65,13 +66,13 @@ internal static class Program
                 Rect caution = TransformMenuLayout.FormCaution(layout.Card(card));
                 Check(Contains(layout.Card(card), caution) && !caution.Overlaps(name) && !caution.Overlaps(toggle),
                     context + ": caution overlaps title or switch");
-                for (int other = card + 1; other < 14; other++)
+                for (int other = card + 1; other < FormCount; other++)
                     Check(!layout.Card(card).Overlaps(layout.Card(other)), context + ": cards overlap");
             }
             if (notice == 0 && ((requested == 1 && sw == 1920) || (requested == 2 && sw == 1280)))
             {
                 var cards = new List<object>();
-                for (int card = 0; card < 14; card++) cards.Add(Bounds(layout.Card(card)));
+                for (int card = 0; card < FormCount; card++) cards.Add(Bounds(layout.Card(card)));
                 previews.Add(new { screenWidth = sw, screenHeight = sh, width = size.x, height = size.y,
                     grid = Bounds(layout.Grid), details = Bounds(layout.Details), layout.Stacked, cards });
             }

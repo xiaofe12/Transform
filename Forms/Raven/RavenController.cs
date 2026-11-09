@@ -12,7 +12,7 @@ using UnityObject = UnityEngine.Object;
 namespace ImRaven;
 
 /// <summary>
-/// Flight controller for the volcano Condor form. Internal Raven identifiers remain stable
+/// Shared flight controller for Condor and Raven. Legacy Condor identifiers remain stable
 /// so existing configuration and room form IDs continue to work. A visual-only copy of the
 /// scene Condor follows the player; its AI, nest and scene PhotonView are never cloned.
 /// Local secondary-use attacks are disabled. Legacy remote grab state remains supported
@@ -33,6 +33,8 @@ public sealed class RavenController : MonoBehaviour
 	private const byte NetworkSyncEventCode = 199;
 	private const string NetworkSyncMagic = "Transform.Condor.Sync";
 	private const string NetworkReleaseMagic = "Transform.Condor.Release";
+	private const string CrowSyncMagic = "Transform.Crow.Sync";
+	private const string CrowReleaseMagic = "Transform.Crow.Release";
 	private const float NetworkSyncInterval = 0.05f;
 	private const float RemoteRiderTimeout = 1.5f;
 
@@ -41,6 +43,7 @@ public sealed class RavenController : MonoBehaviour
 	private static bool _templateFromScene;
 	private static Vector3 _grabAnchorLocal = Vector3.down;
 	private static float _nextTemplateProbe;
+	private static bool _loggedTemplateFailure;
 
 	private Character _character;
 	private readonly global::Transform.Core.FlightMotion _flightMotion = new global::Transform.Core.FlightMotion();
@@ -78,6 +81,8 @@ public sealed class RavenController : MonoBehaviour
 		public Vector3 Position;
 		public Quaternion Rotation;
 		public bool Carrying;
+		public bool Crow;
+		public bool Grounded;
 		public Vector3 Velocity;
 		public float PoseTime;
 		public bool HasPose;
@@ -94,6 +99,10 @@ public sealed class RavenController : MonoBehaviour
 		new List<KeyValuePair<Rigidbody, RigidbodyInterpolation>>();
 
 	public bool Active { get; private set; }
+	internal bool IsCrow { get; private set; }
+	private BirdFlightSettings Settings => IsCrow ? RavenPlugin.CrowSettings : RavenPlugin.CondorSettings;
+	private readonly CrowGroundState _crowGround = new CrowGroundState();
+	private readonly RaycastHit[] _crowGroundHits = new RaycastHit[32];
 
 	/// <summary>The character this controller is driving, for the plugin's camera override.</summary>
 	public Character CharacterRef => _character;
@@ -132,8 +141,9 @@ public sealed class RavenController : MonoBehaviour
 		return controller != null && controller.Active;
 	}
 
-	public void EnterRaven(Character character)
+	public void EnterRaven(Character character, bool crow = false)
 	{
+		IsCrow = crow;
 		_character = character;
 		_flightMotion.Reset(character.transform.position, character.Center);
 		Rigidbody hip = FindPartRig(character, BodypartType.Hip);
@@ -153,6 +163,18 @@ public sealed class RavenController : MonoBehaviour
 		if (hand != null) _originalHandLocalPosition = character.transform.InverseTransformPoint(hand.position);
 		ForceRestoreCharacterCollision();
 		SetRavenNoClip(true);
+		_crowGround.Reset();
+		if (IsCrow && character.data != null && character.data.isGrounded)
+		{
+			float ground = GetCrowGroundHeight(_flightMotion.Position);
+			if (!float.IsNaN(ground))
+			{
+				_crowGround.Reset(true);
+				ApplyFlightStep(_crowGround.Step(_flightMotion.Position, Vector3.zero, ground, false));
+				_flightMotion.Reset(transform.position, _flightMotion.Position);
+				_renderCenter = _flightMotion.Position;
+			}
+		}
 		BuildRavenVisual();
 		if (_visualRoot == null)
 		{
@@ -161,7 +183,7 @@ public sealed class RavenController : MonoBehaviour
 		}
 		HideLocalRenderers();
 		HideHud();
-		LogInfo("Entered Condor form.");
+		LogInfo(IsCrow ? "Entered Raven form." : "Entered Condor form.");
 	}
 
 	public void ExitRaven()
@@ -579,26 +601,33 @@ public sealed class RavenController : MonoBehaviour
 		}
 
 		float vertical = 0f;
-		if (global::Transform.Core.GameInput.JumpHeld(RavenPlugin.UpKey.Value))
+		if (global::Transform.Core.GameInput.JumpHeld(Settings.UpKey.Value))
 		{
 			vertical += 1f;
 		}
-		if (global::Transform.Core.GameInput.CrouchHeld(RavenPlugin.DownKey.Value))
+		if (global::Transform.Core.GameInput.CrouchHeld(Settings.DownKey.Value))
 		{
 			vertical -= 1f;
 		}
 
 		float speedMultiplier = 1f;
-		if (global::Transform.Core.GameInput.SprintHeld(RavenPlugin.SprintKey.Value))
+		if (global::Transform.Core.GameInput.SprintHeld(Settings.SprintKey.Value))
 		{
-			speedMultiplier = Mathf.Max(1f, RavenPlugin.SprintMultiplier.Value);
+			speedMultiplier = Mathf.Max(1f, Settings.SprintMultiplier.Value);
 		}
 
-		Vector3 delta = (move * RavenPlugin.MovementSpeed.Value + Vector3.up * (vertical * RavenPlugin.VerticalSpeed.Value))
+		Vector3 delta = (move * Settings.MovementSpeed.Value + Vector3.up * (vertical * Settings.VerticalSpeed.Value))
 		                * speedMultiplier * Time.fixedDeltaTime;
 
 		// Do not sink through the terrain while descending near it.
-		if (delta.y < 0f)
+		if (IsCrow)
+		{
+			Vector3 probe = _flightMotion.Position + (_crowGround.Grounded && vertical <= 0f
+				? Vector3.zero : new Vector3(delta.x, 0f, delta.z));
+			delta = _crowGround.Step(_flightMotion.Position, delta, GetCrowGroundHeight(probe), vertical > 0f);
+			if (_crowGround.Grounded) move = Vector3.zero;
+		}
+		else if (delta.y < 0f)
 		{
 			float groundY = GetGroundHeight(_flightMotion.Position);
 			if (!float.IsNaN(groundY))
@@ -617,6 +646,23 @@ public sealed class RavenController : MonoBehaviour
 	{
 		_flightMotion.Step(delta, Time.fixedDeltaTime);
 		transform.position = _flightMotion.RootPosition;
+	}
+
+	private float GetCrowGroundHeight(Vector3 position)
+	{
+		// Query nearby support from above the bird, not 400m above a roof/cave.
+		int count = Physics.RaycastNonAlloc(position + Vector3.up * 0.25f, Vector3.down,
+			_crowGroundHits, 3f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+		float height = float.NaN;
+		for (int i = 0; i < count; i++)
+		{
+			RaycastHit hit = _crowGroundHits[i];
+			if (hit.collider == null || hit.normal.y < 0.5f
+				|| hit.collider.GetComponentInParent<Character>() != null
+				|| (CharacterRagdoll.TryGetCharacterFromCollider(hit.collider, out Character owner) && owner != null)) continue;
+			if (float.IsNaN(height) || hit.point.y > height) height = hit.point.y;
+		}
+		return height;
 	}
 
 	private float GetGroundHeight(Vector3 position)
@@ -809,8 +855,9 @@ public sealed class RavenController : MonoBehaviour
 	// Condor visual: copy only the animated model, never the scene AI or PhotonView.
 	// ------------------------------------------------------------------
 
-	internal static bool EnsureVisualTemplate()
+	internal static bool EnsureVisualTemplate(bool crow = false)
 	{
+		if (crow) return CrowVisualAsset.EnsureTemplate();
 		if (_visualTemplate != null && _templateFromScene) return true;
 		if (Time.unscaledTime < _nextTemplateProbe) return _visualTemplate != null;
 		_nextTemplateProbe = Time.unscaledTime + 2f;
@@ -846,12 +893,13 @@ public sealed class RavenController : MonoBehaviour
 			if (previous != null)
 			{
 				RavenController local = ActiveRavenCharacter != null ? ActiveRavenCharacter.GetComponent<RavenController>() : null;
-				if (local != null && local._visualRoot != null)
+				if (local != null && !local.IsCrow && local._visualRoot != null)
 					local._visualRoot = ReplaceVisual(local._visualRoot, local.HasGrab());
 				foreach (RemoteRiderState state in RemoteRiders.Values)
-					if (state.Visual != null) state.Visual = ReplaceVisual(state.Visual, state.Carrying);
+					if (!state.Crow && state.Visual != null) state.Visual = ReplaceVisual(state.Visual, state.Carrying);
 				UnityObject.Destroy(previous);
 			}
+			_loggedTemplateFailure = false;
 			LogInfo("Cached the original volcano Condor model, materials, wing trails and flight audio.");
 			return true;
 		}
@@ -863,18 +911,22 @@ public sealed class RavenController : MonoBehaviour
 		{
 			_visualTemplate = CondorVisualAsset.CreateTemplate(out _grabAnchorLocal);
 			_templateFromScene = false;
+			_loggedTemplateFailure = false;
 			LogInfo("Loaded Condor model, textures, flight animations and glide/flap audio from installed game resources (available in Airport).");
 			return true;
 		}
 		catch (Exception ex)
 		{
-			LogError("Loading Condor visual from installed game resources", ex);
+			if (!_loggedTemplateFailure) LogError("Loading Condor visual from installed game resources", ex);
+			_loggedTemplateFailure = true;
+			_nextTemplateProbe = Time.unscaledTime + 30f;
 			return false;
 		}
 	}
 
-	private static GameObject CreateCondorVisual(Vector3 position, Quaternion rotation)
+	private static GameObject CreateCondorVisual(Vector3 position, Quaternion rotation, bool crow = false)
 	{
+		if (crow) return CrowVisualAsset.Create(position, rotation);
 		if (!EnsureVisualTemplate()) return null;
 		GameObject visual = UnityObject.Instantiate(_visualTemplate, position, rotation);
 		visual.name = "Transform.Condor.Visual";
@@ -906,9 +958,11 @@ public sealed class RavenController : MonoBehaviour
 		ApplyFlightPresentation(visual, Vector3.zero, carrying, 0f);
 	}
 
-	private static CondorFlightMode ApplyFlightPresentation(GameObject visual, Vector3 velocity, bool carrying, float deltaTime)
+	private static CondorFlightMode ApplyFlightPresentation(GameObject visual, Vector3 velocity, bool carrying, float deltaTime, bool grounded = false)
 	{
 		if (visual == null) return CondorFlightMode.Flap;
+		var crowPresentation = visual.GetComponent<CrowFlightPresentation>();
+		if (crowPresentation != null) return crowPresentation.Apply(velocity, deltaTime, grounded);
 		var presentation = visual.GetComponent<CondorFlightPresentation>();
 		if (presentation == null) presentation = visual.AddComponent<CondorFlightPresentation>();
 		return presentation.Apply(velocity, deltaTime, carrying);
@@ -918,7 +972,7 @@ public sealed class RavenController : MonoBehaviour
 	{
 		if (_visualRoot == null && _character != null)
 		{
-			_visualRoot = CreateCondorVisual(_flightMotion.Position, GetVisualRotation());
+			_visualRoot = CreateCondorVisual(_flightMotion.Position, GetVisualRotation(), IsCrow);
 			global::Transform.Core.RestoreSafety.Ignore(_visualRoot);
 		}
 	}
@@ -944,7 +998,12 @@ public sealed class RavenController : MonoBehaviour
 
 		UnityEngine.Transform visual = _visualRoot.transform;
 		visual.position = _renderCenter;
-		CondorFlightMode mode = ApplyFlightPresentation(_visualRoot, _flightMotion.Velocity, HasGrab(), Time.deltaTime);
+		CondorFlightMode mode = ApplyFlightPresentation(_visualRoot, _flightMotion.Velocity, HasGrab(), Time.deltaTime, IsCrow && _crowGround.Grounded);
+		if (IsCrow && _crowGround.Grounded)
+		{
+			visual.rotation = Quaternion.Euler(0f, visual.eulerAngles.y, 0f);
+			return;
+		}
 
 		Vector3 faceDirection = _moveDirection.sqrMagnitude > 0.01f ? _moveDirection : GetVisualFaceDirection();
 		if (faceDirection.sqrMagnitude > 0.01f)
@@ -987,8 +1046,8 @@ public sealed class RavenController : MonoBehaviour
 		_nextNetworkSyncTime = Time.unscaledTime + NetworkSyncInterval;
 		UnityEngine.Transform visual = _visualRoot.transform;
 		PhotonNetwork.RaiseEvent(NetworkSyncEventCode,
-			new object[] { NetworkSyncMagic, _character.photonView.ViewID, _flightMotion.Position, visual.rotation,
-				true, HasGrab(), _flightMotion.Velocity },
+			new object[] { IsCrow ? CrowSyncMagic : NetworkSyncMagic, _character.photonView.ViewID, _flightMotion.Position, visual.rotation,
+				true, HasGrab(), _flightMotion.Velocity, IsCrow && _crowGround.Grounded },
 			new RaiseEventOptions { Receivers = ReceiverGroup.Others },
 			new SendOptions { Reliability = false });
 	}
@@ -1010,18 +1069,30 @@ public sealed class RavenController : MonoBehaviour
 			PhotonView view = PhotonView.Find(characterViewId);
 			// A peer may only update the character it owns.
 			if (view == null || view.IsMine || view.OwnerActorNr != photonEvent.Sender) return;
-			if (magic == NetworkReleaseMagic)
+			if (magic == NetworkReleaseMagic || magic == CrowReleaseMagic)
 			{
-				ReleaseRemoteRider(characterViewId);
+				// A reliable release for the previous bird can arrive after the new
+				// bird's unreliable pose. Do not remove that new visual.
+				if (RemoteRiders.TryGetValue(characterViewId, out RemoteRiderState released)
+					&& released.Crow == (magic == CrowReleaseMagic)) ReleaseRemoteRider(characterViewId);
 				return;
 			}
-			if (magic != NetworkSyncMagic || data.Length < 6
+			if ((magic != NetworkSyncMagic && magic != CrowSyncMagic) || data.Length < 6
 				|| !(data[2] is Vector3 position) || !(data[3] is Quaternion rotation)
 				|| !(data[4] is bool bodyVisible) || !(data[5] is bool carrying)) return;
 			if (!IsFinite(position) || !IsFinite(new Vector3(rotation.x, rotation.y, rotation.z))
 				|| float.IsNaN(rotation.w) || float.IsInfinity(rotation.w)) return;
 			TrackRemoteRider(characterViewId, bodyVisible);
 			if (!RemoteRiders.TryGetValue(characterViewId, out RemoteRiderState state)) return;
+			bool crow = magic == CrowSyncMagic;
+			if (state.Crow != crow)
+			{
+				RestoreRemoteRider(state);
+				state.Hidden = false;
+				state.Visual = null;
+				state.HasPose = false;
+			}
+			state.Crow = crow;
 			float elapsed = Time.unscaledTime - state.PoseTime;
 			Vector3 velocity = data.Length > 6 && data[6] is Vector3 supplied && IsFinite(supplied)
 				? supplied : state.HasPose && elapsed > 0.01f && elapsed < 0.5f && Vector3.Distance(position, state.Position) < 10f
@@ -1032,6 +1103,7 @@ public sealed class RavenController : MonoBehaviour
 			state.Position = position;
 			state.Rotation = rotation;
 			state.Carrying = carrying;
+			state.Grounded = crow && data.Length > 7 && data[7] is bool grounded && grounded;
 		}
 		catch (Exception ex)
 		{
@@ -1048,7 +1120,7 @@ public sealed class RavenController : MonoBehaviour
 				return;
 			}
 			PhotonNetwork.RaiseEvent(NetworkSyncEventCode,
-				new object[] { NetworkReleaseMagic, _character.photonView.ViewID },
+				new object[] { IsCrow ? CrowReleaseMagic : NetworkReleaseMagic, _character.photonView.ViewID },
 				new RaiseEventOptions { Receivers = ReceiverGroup.Others },
 				new SendOptions { Reliability = true });
 		}
@@ -1067,7 +1139,13 @@ public sealed class RavenController : MonoBehaviour
 
 	internal static void TickRemoteVisuals()
 	{
-		EnsureVisualTemplate();
+		// Keep the disk-to-scene Condor upgrade while it is in use, without
+		// repeatedly loading resources from idle module ticks.
+		bool needsCondor = RavenPlugin.IsActive;
+		if (!needsCondor)
+			foreach (RemoteRiderState rider in RemoteRiders.Values)
+				if (!rider.Crow) { needsCondor = true; break; }
+		if (needsCondor) EnsureVisualTemplate();
 		List<int> expired = null;
 		foreach (KeyValuePair<int, RemoteRiderState> pair in RemoteRiders)
 		{
@@ -1078,7 +1156,7 @@ public sealed class RavenController : MonoBehaviour
 				expired.Add(pair.Key);
 				continue;
 			}
-			if (state.Visual == null) state.Visual = CreateCondorVisual(state.Position, state.Rotation);
+			if (state.Visual == null) state.Visual = CreateCondorVisual(state.Position, state.Rotation, state.Crow);
 			if (state.Visual == null) continue;
 			UnityEngine.Transform visual = state.Visual.transform;
 			float blend = 1f - Mathf.Exp(-20f * Time.unscaledDeltaTime);
@@ -1086,7 +1164,7 @@ public sealed class RavenController : MonoBehaviour
 			visual.position = teleported ? state.Position : Vector3.Lerp(visual.position, state.Position, blend);
 			if (teleported) ClearWingTrails(state.Visual);
 			visual.rotation = Quaternion.Slerp(visual.rotation, state.Rotation, blend);
-			ApplyFlightPresentation(state.Visual, Time.unscaledTime - state.PoseTime < 0.5f ? state.Velocity : Vector3.zero, state.Carrying, Time.unscaledDeltaTime);
+			ApplyFlightPresentation(state.Visual, Time.unscaledTime - state.PoseTime < 0.5f ? state.Velocity : Vector3.zero, state.Carrying, Time.unscaledDeltaTime, state.Grounded);
 			SetCharacterRenderers(state.Character, false);
 			state.Hidden = true;
 		}
@@ -1101,6 +1179,8 @@ public sealed class RavenController : MonoBehaviour
 		_visualTemplate = null;
 		_templateFromScene = false;
 		CondorVisualAsset.Clear();
+		CrowVisualAsset.Clear();
+		_loggedTemplateFailure = false;
 		_nextTemplateProbe = 0f;
 	}
 
@@ -1183,6 +1263,8 @@ public sealed class RavenController : MonoBehaviour
 			RemoteRiders.Remove(characterViewId);
 			return false;
 		}
+		// Missing/changed assets must leave the ordinary remote player visible.
+		if (state.Visual == null) return false;
 		if (!state.Hidden)
 		{
 			SetCharacterRenderers(character, false);
@@ -1313,21 +1395,21 @@ public sealed class RavenController : MonoBehaviour
 		}
 	}
 
-	private static float GetCameraDistance()
+	private float GetCameraDistance()
 	{
-		float value = RavenPlugin.CameraDistance != null ? RavenPlugin.CameraDistance.Value : DefaultCameraDistance;
+		float value = Settings.CameraDistance != null ? Settings.CameraDistance.Value : DefaultCameraDistance;
 		return Mathf.Clamp(value, 3f, 15f);
 	}
 
-	private static float GetCameraHeight()
+	private float GetCameraHeight()
 	{
-		float value = RavenPlugin.CameraHeight != null ? RavenPlugin.CameraHeight.Value : DefaultCameraHeight;
+		float value = Settings.CameraHeight != null ? Settings.CameraHeight.Value : DefaultCameraHeight;
 		return Mathf.Clamp(value, 0.3f, 8f);
 	}
 
-	private static float GetCameraFov()
+	private float GetCameraFov()
 	{
-		float value = RavenPlugin.CameraFov != null ? RavenPlugin.CameraFov.Value : DefaultCameraFov;
+		float value = Settings.CameraFov != null ? Settings.CameraFov.Value : DefaultCameraFov;
 		return Mathf.Clamp(value, 60f, 110f);
 	}
 

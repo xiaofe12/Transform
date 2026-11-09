@@ -10,7 +10,7 @@ using Transform.Core;
 namespace ImRaven;
 
 /// <summary>
-/// Raven form module, driven by the unified Transform plugin. Binds the config sections,
+/// Shared Condor/Raven form module, driven by the unified Transform plugin. Binds the config sections,
 /// installs the Harmony patches (vanilla grab auto-release guard + camera fallback), keeps the
 /// custom network sync event registered and orchestrates form enter/exit on RavenController.
 /// </summary>
@@ -35,7 +35,9 @@ internal static class RavenPlugin
 	private static bool _initialized;
 
 	/// <summary>True while the local player is in Condor form.</summary>
-	internal static bool IsActive => _controller != null && _controller.Active;
+	internal static bool IsActive => _controller != null && _controller.Active && !_controller.IsCrow;
+	internal static bool IsCrowActive => _controller != null && _controller.Active && _controller.IsCrow;
+	internal static BirdFlightSettings CondorSettings, CrowSettings;
 
 	internal static void Initialize(ConfigFile config, ManualLogSource log)
 	{
@@ -72,10 +74,16 @@ internal static class RavenPlugin
 			"Field of view while in Condor form.",
 			new AcceptableValueRange<float>(60f, 110f)));
 
-		// Custom position/rotation sync for the networked raven (modded clients only).
+		CondorSettings = new BirdFlightSettings {
+			UpKey = UpKey, DownKey = DownKey, SprintKey = SprintKey, MovementSpeed = MovementSpeed,
+			VerticalSpeed = VerticalSpeed, SprintMultiplier = SprintMultiplier,
+			CameraDistance = CameraDistance, CameraHeight = CameraHeight, CameraFov = CameraFov };
+		CrowSettings = BirdFlightSettings.CreateCrow(config);
+
+		// Shared flight sync, with separate Condor/Raven visual tags (modded clients only).
 		PhotonNetwork.NetworkingClient.EventReceived += OnPhotonEvent;
 
-		Log.LogInfo("[Condor] Module loaded (integrated into Transform).");
+		Log.LogInfo("[Birds] Condor and Raven modules loaded (integrated into Transform).");
 	}
 
 	private static void ConfigureCameraFallbackPatch()
@@ -139,30 +147,30 @@ internal static class RavenPlugin
 		}
 	}
 
-	/// <summary>State gate shared with the unified menu: may the local player enter Condor form now?</summary>
-	internal static bool CanEnter(Character character)
+	/// <summary>State gate shared with the unified menu for either bird.</summary>
+	internal static bool CanEnter(Character character, bool crow = false)
 	{
-		if (IsActive) return false;
+		if (_controller != null && _controller.Active) return false;
 		if (RavenController.IsLocalRavenCharacter(character))
 		{
 			FormValidation.ReportFailure(Log, "Raven", "[Condor] Already in Condor form.");
 			return false;
 		}
 		if (!FormValidation.IsValid(Log, "Raven", FormValidation.ValidateTransformable(character))) return false;
-		if (!RavenController.EnsureVisualTemplate())
+		if (!RavenController.EnsureVisualTemplate(crow))
 		{
-			FormValidation.ReportFailure(Log, "CondorVisual", "[Condor] Could not load Condor from the scene or installed game resources; check for missing/changed game files in the error above.");
+			FormValidation.ReportFailure(Log, crow ? "CrowVisual" : "CondorVisual", crow ? "[Raven] Could not load native Raven resources." : "[Condor] Could not load Condor from the scene or installed game resources; check for missing/changed game files in the error above.");
 			return false;
 		}
-		FormValidation.ClearFailure("CondorVisual");
+		FormValidation.ClearFailure(crow ? "CrowVisual" : "CondorVisual");
 		return true;
 	}
 
-	/// <summary>Enters Condor form. Returns true when the controller accepted the request.</summary>
-	internal static bool Enter(Character character)
+	/// <summary>Enters the requested bird. Returns true when the controller accepted the request.</summary>
+	internal static bool Enter(Character character, bool crow = false)
 	{
 		if (_controller != null && _controller.Active) return false;
-		if (!CanEnter(character)) return false;
+		if (!CanEnter(character, crow)) return false;
 		try
 		{
 			_controller = character.gameObject.GetComponent<RavenController>();
@@ -170,12 +178,12 @@ internal static class RavenPlugin
 			{
 				_controller = character.gameObject.AddComponent<RavenController>();
 			}
-			_controller.EnterRaven(character);
+			_controller.EnterRaven(character, crow);
 			return _controller.Active;
 		}
 		catch (Exception ex)
 		{
-			Log?.LogError("[Condor] Failed to enter Condor form:\n" + ex);
+			Log?.LogError((crow ? "[Raven]" : "[Condor]") + " Failed to enter form:\n" + ex);
 			_controller?.ExitRaven();
 			_controller = null;
 			return false;

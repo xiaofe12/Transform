@@ -191,6 +191,12 @@ internal static class FormControlHints
         }
         switch (form.Id)
         {
+            case FormId.Crow:
+                Hints[0] = new Hint(Hints[0].Key, Tr("飞行移动", "Move in flight"));
+                add(CharacterInput.action_jump, ImRaven.RavenPlugin.CrowSettings.UpKey.Value, "起飞 / 上升", "Take off / rise");
+                add(CharacterInput.action_crouch, ImRaven.RavenPlugin.CrowSettings.DownKey.Value, "下降 / 降落", "Descend / land");
+                add(CharacterInput.action_sprint, ImRaven.RavenPlugin.CrowSettings.SprintKey.Value, "加速", "Boost");
+                break;
             case FormId.Raven:
                 add(CharacterInput.action_jump, ImRaven.RavenPlugin.UpKey.Value, "上升", "Rise");
                 add(CharacterInput.action_crouch, ImRaven.RavenPlugin.DownKey.Value, "下降", "Descend");

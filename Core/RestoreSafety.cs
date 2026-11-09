@@ -46,7 +46,7 @@ internal static class RestoreSafety
         if (local == null) return;
         FormId? id = FormRegistry.ActiveForm?.Id;
         if (id == FormId.Scoutmaster) local = ImScoutmaster.Plugin.GetControlledScoutmasterCharacter() ?? local;
-        bool inPlace = id == FormId.Ghost || id == FormId.Raven || id == FormId.Tornado;
+        bool inPlace = id == FormId.Ghost || id == FormId.Raven || id == FormId.Crow || id == FormId.Tornado;
         // Ground/item forms already add this clearance when they restore. Sample
         // the same torso location, rather than the small item's ground-level pivot.
         History.Observe(local.Center + (inPlace ? Vector3.zero : Vector3.up * 0.6f), IsClear);
